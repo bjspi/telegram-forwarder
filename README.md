@@ -50,7 +50,7 @@
 - **Hot-reload** — `bot_config.json` is reloaded on change without a restart; a corrupt edit never crashes the bot.
 - **Self-healing** — active health-check with hard-exit for supervisor restarts, plus a two-layer reconnect strategy.
 - **Scheduled commands** — slash commands work from Telegram's scheduled-messages view, with replies that never leak to the chat partner.
-- **Optional control bot** — a separate BotFather bot with an inline-button menu to review the config and toggle per-chat settings (direction, view-once, keep-alive, …) from anywhere — locked to your own user id.
+- **Optional control bot** — a separate BotFather bot with an inline-button menu to review the config, toggle per-chat settings (direction, view-once, keep-alive, …) and add new rules by picking from your recent chats — all locked to your own user id.
 - **Fully headless if you want** — one env switch disables all chat commands; the bot then runs purely off the JSON config.
 
 ## How It Works
@@ -248,9 +248,12 @@ Then send `/menu` to your bot. Every screen is **locked to `CONTROL_BOT_OWNER_ID
   - **View-once media** — off · on · only
   - **Name prefix**, **Store edits**, **Mark target unread**
   - **Keep-alive** — enable/disable the chat's daily ping (if one exists)
-- **⏰ Keep-alives** — enable or disable each keep-alive with one tap.
+  - **➕ Add listener** — build a new rule (see below)
+- **⏰ Keep-alives** — enable or disable each keep-alive with one tap, or **➕ Add keep-alive**.
 
-The control bot also registers its own command menu (`/menu`, `/start`) via the Bot API, so the commands show up in Telegram's UI. It's a pure *controller*: it edits existing rules — creating brand-new listeners/keep-alives is still done with the userbot's `/copy` and `/keepalive` commands (or by editing `bot_config.json`).
+**Creating rules from the menu:** *Add listener* and *Add keep-alive* walk you through a short flow. For each chat you either **pick from your 20 most recently active chats** (the userbot fetches them live — no need to remember ids) or **type a chat id / @username**, which is verified by resolving it before anything is saved. Keep-alive times are entered as `HH:MM:SS` and validated. Everything else — targets, message pools, exclusions — is still configured with the userbot's `/copy` / `/keepalive` commands or by editing `bot_config.json`.
+
+The control bot also registers its own command menu (`/menu`, `/start`) via the Bot API, so the commands show up in Telegram's UI.
 
 ## Architecture
 

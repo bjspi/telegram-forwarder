@@ -29,9 +29,8 @@ async def resolve_target_chats(client: Client, raw_values: list[str]) -> list[Ch
     return resolved_target_chats
 
 
-async def build_recent_chats_text(client: Client, limit: int = 20) -> str:
-    """Builds a text listing the most recently active dialogs with chat ids."""
-    lines: list[str] = ["Recent chats:"]
+async def _collect_recent_dialogs(client: Client, limit: int) -> list[Any]:
+    """Collects and de-duplicates the most recently active dialogs, newest first."""
     collected_dialogs: list[Any] = []
     seen_chat_ids: set[int] = set()
 
@@ -58,8 +57,22 @@ async def build_recent_chats_text(client: Client, limit: int = 20) -> str:
         key=lambda dialog: getattr(getattr(dialog, "top_message", None), "date", datetime.min),
         reverse=True,
     )
+    return sorted_dialogs[:limit]
 
-    for index, dialog in enumerate(sorted_dialogs[:limit], start=1):
+
+async def get_recent_chats(client: Client, limit: int = 20) -> list[ChatRef]:
+    """Returns the most recently active dialogs as chat references (id + display name)."""
+    dialogs = await _collect_recent_dialogs(client, limit)
+    return [
+        ChatRef(chat_id=int(dialog.chat.id), chat_name=get_chat_name_from_chat(dialog.chat))
+        for dialog in dialogs
+    ]
+
+
+async def build_recent_chats_text(client: Client, limit: int = 20) -> str:
+    """Builds a text listing the most recently active dialogs with chat ids."""
+    lines: list[str] = ["Recent chats:"]
+    for index, dialog in enumerate(await _collect_recent_dialogs(client, limit), start=1):
         chat = dialog.chat
         chat_type_text: str = str(getattr(chat, "type", "")).split(".")[-1].lower() or "unknown"
         title: str = str(

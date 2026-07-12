@@ -15,6 +15,27 @@ MAIN_MENU_TEXT = (
     "Pick a section to view or change the live configuration."
 )
 
+# Prompts for the multi-step add flows.
+ADD_LISTENER_SOURCE_TEXT = (
+    "➕ **New listener** — step 1 of 2\n\n"
+    "Pick the **source** chat (where messages are copied *from*), "
+    "or type its id / @username."
+)
+ADD_LISTENER_TARGET_TEXT = (
+    "➕ **New listener** — step 2 of 2\n\n"
+    "Pick the **target** chat (where messages are copied *to*), "
+    "or type its id / @username."
+)
+ADD_KEEPALIVE_CHAT_TEXT = (
+    "➕ **New keep-alive** — step 1 of 2\n\n"
+    "Pick the chat for the daily ping, or type its id / @username."
+)
+ADD_KEEPALIVE_TIME_TEXT = (
+    "➕ **New keep-alive** — step 2 of 2\n\n"
+    "Send the time of day as **HH:MM:SS** (e.g. `08:00:00`)."
+)
+TYPE_CHAT_TEXT = "✍️ Send me the chat **id** (e.g. `-1001234567890`) or a **@username**."
+
 
 def render_overview_text(store: BotConfigStore) -> str:
     """Builds the full overview across listeners and keep-alives."""

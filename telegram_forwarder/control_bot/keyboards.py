@@ -17,7 +17,7 @@ Callback-data scheme (``|``-separated, well under Telegram's 64-byte limit):
 from __future__ import annotations
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from ..core.config_store import BotConfigStore
-from ..core.models import KeepAliveRule, ListenerRule
+from ..core.models import ChatRef, KeepAliveRule, ListenerRule
 
 
 def _mark(active: bool, label: str) -> str:
@@ -48,6 +48,7 @@ def listeners_keyboard(store: BotConfigStore) -> InlineKeyboardMarkup:
         rows.append([_btn(f"📡 {label}", f"l|{rule.source_chat_id}")])
     if not rows:
         rows.append([_btn("No listeners configured", "nop")])
+    rows.append([_btn("➕ Add listener", "ladd")])
     rows.append([_btn("⬅️ Back", "home")])
     return InlineKeyboardMarkup(rows)
 
@@ -60,8 +61,30 @@ def keepalives_keyboard(store: BotConfigStore) -> InlineKeyboardMarkup:
         rows.append([_btn(_mark(rule.enabled, f"{name} @ {rule.time_of_day}"), f"k|{rule.chat_id}|kal")])
     if not rows:
         rows.append([_btn("No keep-alives configured", "nop")])
+    rows.append([_btn("➕ Add keep-alive", "kadd")])
     rows.append([_btn("⬅️ Back", "home")])
     return InlineKeyboardMarkup(rows)
+
+
+def recent_chats_keyboard(recent: list[ChatRef]) -> InlineKeyboardMarkup:
+    """Builds a picker of recently active chats plus a type/cancel fallback.
+
+    Buttons carry the chat's index in ``recent`` (``pick|<index>``) rather than
+    its id, keeping callback data short; the handler maps it back via the
+    pending action's stored list.
+    """
+    rows: list[list[InlineKeyboardButton]] = []
+    for index, chat in enumerate(recent):
+        label = chat.chat_name or str(chat.chat_id)
+        rows.append([_btn(f"{index + 1}. {label}", f"pick|{index}")])
+    rows.append([_btn("✍️ Type id / @username", "typ")])
+    rows.append([_btn("✖️ Cancel", "cancel")])
+    return InlineKeyboardMarkup(rows)
+
+
+def cancel_keyboard() -> InlineKeyboardMarkup:
+    """Builds a single-button cancel keyboard for text-input steps."""
+    return InlineKeyboardMarkup([[_btn("✖️ Cancel", "cancel")]])
 
 
 def listener_detail_keyboard(rule: ListenerRule, keepalive: KeepAliveRule | None) -> InlineKeyboardMarkup:
