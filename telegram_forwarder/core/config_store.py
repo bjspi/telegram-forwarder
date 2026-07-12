@@ -91,6 +91,9 @@ class BotConfigStore:
             if "mark_target_unread" not in item:
                 item["mark_target_unread"] = False
                 migration_needed = True
+            if "view_once_only" not in item:
+                item["view_once_only"] = False
+                migration_needed = True
             if "exclusions" in item:
                 original_exclusions = list(item.get("exclusions", []))
                 filtered_exclusions = [
@@ -116,6 +119,7 @@ class BotConfigStore:
                 copy_outgoing=bool(item.get("copy_outgoing", True)),
                 store_edits=bool(item.get("store_edits", False)),
                 mark_target_unread=bool(item.get("mark_target_unread", False)),
+                view_once_only=bool(item.get("view_once_only", False)),
             )
             for item in listeners
         }
@@ -198,6 +202,7 @@ class BotConfigStore:
         source_chat: ChatRef,
         target_chats: list[ChatRef],
         name_prefix: bool | None = None,
+        view_once_only: bool | None = None,
     ) -> tuple[ListenerRule, list[ChatRef]]:
         """Creates or extends a listener for one source chat without duplicating targets."""
         existing = self._listeners.get(source_chat.chat_id)
@@ -224,6 +229,7 @@ class BotConfigStore:
             copy_outgoing=existing.copy_outgoing if existing else True,
             store_edits=existing.store_edits if existing else False,
             mark_target_unread=existing.mark_target_unread if existing else False,
+            view_once_only=(existing.view_once_only if existing else False) if view_once_only is None else view_once_only,
         )
         self._listeners[source_chat.chat_id] = rule
         self.save()

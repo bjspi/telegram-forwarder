@@ -13,6 +13,7 @@ from ..core.rules import (
     get_editable_content,
     get_message_text,
     is_outgoing_message,
+    passes_view_once_filter,
     should_copy_by_direction,
     should_exclude_message,
 )
@@ -69,6 +70,13 @@ def register_forward_handlers(app: Client, store: BotConfigStore, forward_index:
                     rule.copy_outgoing,
                 )
                 return
+            if not passes_view_once_filter(message, rule):
+                logging.info(
+                    "Message %s in %s skipped by view-once filter (view_once_only=true, message is not view-once media).",
+                    message.id,
+                    message.chat.id,
+                )
+                return
             await copy_or_replace_message(client, message, rule, forward_index)
         except Exception:
             logging.exception("Error in message listener for chat %s at message %s.", message.chat.id, message.id)
@@ -84,7 +92,11 @@ def register_forward_handlers(app: Client, store: BotConfigStore, forward_index:
             rule = store.get_listener(message.chat.id)
             if rule is None:
                 return
-            if should_exclude_message(message, rule) or not should_copy_by_direction(message, rule):
+            if (
+                should_exclude_message(message, rule)
+                or not should_copy_by_direction(message, rule)
+                or not passes_view_once_filter(message, rule)
+            ):
                 record = forward_index.remove_record(message.chat.id, message.id)
                 if record is not None:
                     await delete_forwarded_targets(client, record.target_message_ids)

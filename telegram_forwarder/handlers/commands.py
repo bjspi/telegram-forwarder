@@ -32,13 +32,14 @@ from ..ui.replies import send_and_delete_message
 from .filters import CMD_BASE
 
 
-async def resolve_copy_command_args(client: Client, message: Message) -> tuple[ChatRef, list[ChatRef], bool | None]:
+async def resolve_copy_command_args(client: Client, message: Message) -> tuple[ChatRef, list[ChatRef], bool | None, bool | None]:
     """Resolves /copy arguments to either current-chat mode or explicit source-target mode."""
     command_args: list[str] = list(message.command[1:])
     if not command_args:
         raise ValueError("Usage: /copy <target> [more...] or /copy <source> <target> [more...]")
 
     name_prefix: bool | None = None
+    view_once_only: bool | None = None
     filtered_command_args: list[str] = []
     for command_arg in command_args:
         normalized_arg = command_arg.strip().lower()
@@ -48,22 +49,29 @@ async def resolve_copy_command_args(client: Client, message: Message) -> tuple[C
         if normalized_arg == "--no-name-prefix":
             name_prefix = False
             continue
+        if normalized_arg == "--view-once-only":
+            view_once_only = True
+            continue
+        if normalized_arg == "--no-view-once-only":
+            view_once_only = False
+            continue
         filtered_command_args.append(command_arg)
     command_args = filtered_command_args
 
     if not command_args:
-        raise ValueError("Usage: /copy <target> [more...] [--name-prefix] or /copy <source> <target> [more...] [--name-prefix]")
+        raise ValueError("Usage: /copy [<source>] <target> [more...] [--name-prefix] [--view-once-only]")
 
     if len(command_args) == 1:
         return (
             ChatRef(chat_id=int(message.chat.id), chat_name=get_chat_name_from_chat(message.chat)),
             await resolve_target_chats(client, command_args),
             name_prefix,
+            view_once_only,
         )
 
     source_chat: ChatRef = await resolve_chat_ref(client, command_args[0])
     target_chats: list[ChatRef] = await resolve_target_chats(client, command_args[1:])
-    return source_chat, target_chats, name_prefix
+    return source_chat, target_chats, name_prefix, view_once_only
 
 
 def register_command_handlers(app: Client, store: BotConfigStore, scheduler: AsyncIOScheduler) -> None:
@@ -147,16 +155,17 @@ def register_command_handlers(app: Client, store: BotConfigStore, scheduler: Asy
             if len(message.command) < 2:
                 await send_and_delete_message(
                     message,
-                    "Usage: /copy <target> [more...] [--name-prefix] or /copy <source> <target> [more...] [--name-prefix]",
+                    "Usage: /copy [<source>] <target> [more...] [--name-prefix] [--view-once-only]",
                     store.delete_delay_seconds,
                 )
                 return
 
-            source_chat, target_chats, name_prefix = await resolve_copy_command_args(client, message)
+            source_chat, target_chats, name_prefix, view_once_only = await resolve_copy_command_args(client, message)
             rule, added_target_chats = store.upsert_listener(
                 source_chat=source_chat,
                 target_chats=target_chats,
                 name_prefix=name_prefix,
+                view_once_only=view_once_only,
             )
             sync_keepalive_jobs(scheduler, store, app)
 
@@ -177,6 +186,7 @@ def register_command_handlers(app: Client, store: BotConfigStore, scheduler: Asy
                     f"Source: `{format_chat_ref(ChatRef(rule.source_chat_id, rule.source_chat_name))}`\n"
                     f"Active targets: `{format_chat_refs(rule.target_chats)}`\n"
                     f"name_prefix: `{rule.name_prefix}`\n"
+                    f"view_once_only: `{rule.view_once_only}`\n"
                     f"Exclusions: {', '.join(rule.exclusions) or '(none)'}\n"
                     f"{get_status_text(store)}"
                 ),

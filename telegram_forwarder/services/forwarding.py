@@ -17,7 +17,7 @@ from pyrogram.types import Message
 from ..core.forward_index import ForwardIndex
 from ..core.models import ForwardRecord, ListenerRule
 from ..core.naming import build_rendered_body, maybe_prefix_text
-from ..core.rules import get_editable_content, is_outgoing_message
+from ..core.rules import get_editable_content, is_outgoing_message, is_view_once_message
 
 
 def detect_media_type(message: Message) -> str:
@@ -163,6 +163,10 @@ async def copy_message_to_target(
     try:
         if getattr(message.chat, "has_protected_content", False) or getattr(message, "has_protected_content", False):
             raise RuntimeError("protected_content")
+        # View-once media cannot be copied or forwarded via the API — skip
+        # straight to the download/re-upload fallback (archived as regular media).
+        if is_view_once_message(message):
+            raise RuntimeError("view_once_media")
 
         copied = await message.copy(chat_id=target_chat_id)
         logging.info(

@@ -26,6 +26,7 @@ class ListenerRule:
     copy_outgoing: bool = True
     store_edits: bool = False
     mark_target_unread: bool = False
+    view_once_only: bool = False
 
     @property
     def target_chat_ids(self) -> list[int]:

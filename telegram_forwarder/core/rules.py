@@ -39,6 +39,31 @@ def should_copy_by_direction(message: Message, rule: ListenerRule) -> bool:
     return True
 
 
+"""Media attributes that can carry a self-destruct timer (view/listen-once)."""
+SELF_DESTRUCT_MEDIA_TYPES: tuple[str, ...] = ("photo", "video", "voice", "video_note", "animation")
+
+
+def is_view_once_message(message: Message) -> bool:
+    """Returns whether the message carries self-destructing (view/listen-once) media.
+
+    Telegram marks view-once photos/videos and listen-once voice/video notes
+    with a ``ttl_seconds`` value on the media object (0x7FFFFFFF for
+    view-once, otherwise the self-destruct timer). Any truthy TTL counts.
+    """
+    if getattr(message, "ttl_seconds", None):
+        return True
+    for media_type in SELF_DESTRUCT_MEDIA_TYPES:
+        media = getattr(message, media_type, None)
+        if media is not None and getattr(media, "ttl_seconds", None):
+            return True
+    return False
+
+
+def passes_view_once_filter(message: Message, rule: ListenerRule) -> bool:
+    """Checks whether the message passes the listener's view-once-only filter."""
+    return not rule.view_once_only or is_view_once_message(message)
+
+
 def get_editable_content(message: Message) -> tuple[str, str]:
     """Returns the editable content type and body for a message."""
     if message.text:

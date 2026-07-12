@@ -48,9 +48,10 @@ def format_listener_line(rule: ListenerRule) -> str:
     direction_text = f"in={int(rule.copy_incoming)}, out={int(rule.copy_outgoing)}"
     edit_text = f"store_edits={int(rule.store_edits)}"
     unread_text = f"mark_target_unread={int(rule.mark_target_unread)}"
+    view_once_text = f"view_once_only={int(rule.view_once_only)}"
     return (
         f"{format_chat_ref(source_ref)} -> {format_chat_refs(rule.target_chats)} "
-        f"| name_prefix={prefix_text} | {direction_text} | {edit_text} | {unread_text}"
+        f"| name_prefix={prefix_text} | {direction_text} | {edit_text} | {unread_text} | {view_once_text}"
     )
 
 
@@ -87,6 +88,7 @@ def get_status_text(store: BotConfigStore) -> str:
         f"{format_chat_ref(ChatRef(rule.source_chat_id, rule.source_chat_name))}->{format_chat_refs(rule.target_chats)}"
         f"{' [name_prefix]' if rule.name_prefix else ''}"
         f"{' [mark_target_unread]' if rule.mark_target_unread else ''}"
+        f"{' [view_once_only]' if rule.view_once_only else ''}"
         for rule in listeners
     )
     keepalive_text = "none" if not keepalives else ", ".join(
@@ -114,9 +116,9 @@ def build_help_text(store: BotConfigStore) -> str:
         "Shows all targets for a specific source.\n\n"
         "`/config all`\n"
         "Shows all configured source-target connections.\n\n"
-        "`/copy <target> [more...] [--name-prefix]`\n"
+        "`/copy <target> [more...] [--name-prefix] [--view-once-only]`\n"
         "Uses the current chat as source and adds one or more targets.\n\n"
-        "`/copy <source> <target> [more...] [--name-prefix]`\n"
+        "`/copy <source> <target> [more...] [--name-prefix] [--view-once-only]`\n"
         "Creates a rule from any chat.\n\n"
         "`/stop`\n"
         "Removes all targets for the current chat.\n\n"
@@ -144,6 +146,8 @@ def build_help_text(store: BotConfigStore) -> str:
         "- `copy_incoming` and `copy_outgoing` both default to `true`.\n"
         "- `store_edits` defaults to `false`.\n"
         "- `mark_target_unread` defaults to `false`.\n"
+        "- `view_once_only` defaults to `false`; when `true`, ONLY self-destructing view-once media (photos, videos, voice/video notes) are forwarded — everything else is skipped. Toggle with `--view-once-only` / `--no-view-once-only`.\n"
+        "- View-once media is archived as regular (persistent) media in the target chat.\n"
         "- `keepalives[].message_text` can be a string or a list of strings.\n"
         "- `keepalives[].enabled` defaults to `true`.\n"
         "- If it is a list, a random entry is used for each keep-alive.\n"
