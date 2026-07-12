@@ -18,6 +18,7 @@ from ..connection.chats import build_recent_chats_text, resolve_chat_ref, resolv
 from ..core.config_store import BotConfigStore
 from ..core.models import ChatRef
 from ..core.naming import get_chat_name_from_chat
+from ..core.rules import VIEW_ONCE_MODES
 from ..services.keepalive import parse_hms, sync_keepalive_jobs
 from ..settings import CONFIG_ALL_DELETE_DELAY_SECONDS, LIST_CHATS_DELETE_DELAY_SECONDS
 from ..ui.formatting import (
@@ -32,14 +33,14 @@ from ..ui.replies import send_and_delete_message
 from .filters import CMD_BASE
 
 
-async def resolve_copy_command_args(client: Client, message: Message) -> tuple[ChatRef, list[ChatRef], bool | None, bool | None]:
+async def resolve_copy_command_args(client: Client, message: Message) -> tuple[ChatRef, list[ChatRef], bool | None, str | None]:
     """Resolves /copy arguments to either current-chat mode or explicit source-target mode."""
     command_args: list[str] = list(message.command[1:])
     if not command_args:
         raise ValueError("Usage: /copy <target> [more...] or /copy <source> <target> [more...]")
 
     name_prefix: bool | None = None
-    view_once_only: bool | None = None
+    view_once: str | None = None
     filtered_command_args: list[str] = []
     for command_arg in command_args:
         normalized_arg = command_arg.strip().lower()
@@ -49,29 +50,29 @@ async def resolve_copy_command_args(client: Client, message: Message) -> tuple[C
         if normalized_arg == "--no-name-prefix":
             name_prefix = False
             continue
-        if normalized_arg == "--view-once-only":
-            view_once_only = True
-            continue
-        if normalized_arg == "--no-view-once-only":
-            view_once_only = False
+        if normalized_arg.startswith("--view-once="):
+            value = normalized_arg.split("=", 1)[1]
+            if value not in VIEW_ONCE_MODES:
+                raise ValueError(f"--view-once must be one of: {', '.join(VIEW_ONCE_MODES)}")
+            view_once = value
             continue
         filtered_command_args.append(command_arg)
     command_args = filtered_command_args
 
     if not command_args:
-        raise ValueError("Usage: /copy [<source>] <target> [more...] [--name-prefix] [--view-once-only]")
+        raise ValueError("Usage: /copy [<source>] <target> [more...] [--name-prefix] [--view-once=off|on|only]")
 
     if len(command_args) == 1:
         return (
             ChatRef(chat_id=int(message.chat.id), chat_name=get_chat_name_from_chat(message.chat)),
             await resolve_target_chats(client, command_args),
             name_prefix,
-            view_once_only,
+            view_once,
         )
 
     source_chat: ChatRef = await resolve_chat_ref(client, command_args[0])
     target_chats: list[ChatRef] = await resolve_target_chats(client, command_args[1:])
-    return source_chat, target_chats, name_prefix, view_once_only
+    return source_chat, target_chats, name_prefix, view_once
 
 
 def register_command_handlers(app: Client, store: BotConfigStore, scheduler: AsyncIOScheduler) -> None:
@@ -155,17 +156,17 @@ def register_command_handlers(app: Client, store: BotConfigStore, scheduler: Asy
             if len(message.command) < 2:
                 await send_and_delete_message(
                     message,
-                    "Usage: /copy [<source>] <target> [more...] [--name-prefix] [--view-once-only]",
+                    "Usage: /copy [<source>] <target> [more...] [--name-prefix] [--view-once=off|on|only]",
                     store.delete_delay_seconds,
                 )
                 return
 
-            source_chat, target_chats, name_prefix, view_once_only = await resolve_copy_command_args(client, message)
+            source_chat, target_chats, name_prefix, view_once = await resolve_copy_command_args(client, message)
             rule, added_target_chats = store.upsert_listener(
                 source_chat=source_chat,
                 target_chats=target_chats,
                 name_prefix=name_prefix,
-                view_once_only=view_once_only,
+                view_once=view_once,
             )
             sync_keepalive_jobs(scheduler, store, app)
 
@@ -186,7 +187,7 @@ def register_command_handlers(app: Client, store: BotConfigStore, scheduler: Asy
                     f"Source: `{format_chat_ref(ChatRef(rule.source_chat_id, rule.source_chat_name))}`\n"
                     f"Active targets: `{format_chat_refs(rule.target_chats)}`\n"
                     f"name_prefix: `{rule.name_prefix}`\n"
-                    f"view_once_only: `{rule.view_once_only}`\n"
+                    f"view_once: `{rule.view_once}`\n"
                     f"Exclusions: {', '.join(rule.exclusions) or '(none)'}\n"
                     f"{get_status_text(store)}"
                 ),

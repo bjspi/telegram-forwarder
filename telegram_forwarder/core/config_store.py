@@ -17,6 +17,7 @@ from ..settings import (
     TIMEZONE,
 )
 from .models import ChatRef, KeepAliveRule, ListenerRule
+from .rules import normalize_view_once
 
 
 class BotConfigStore:
@@ -91,9 +92,18 @@ class BotConfigStore:
             if "mark_target_unread" not in item:
                 item["mark_target_unread"] = False
                 migration_needed = True
-            if "view_once_only" not in item:
-                item["view_once_only"] = False
+            if "view_once_only" in item:
+                # Migrate the old boolean flag to the tri-state view_once field.
+                item["view_once"] = "only" if item.pop("view_once_only") else "off"
                 migration_needed = True
+            if "view_once" not in item:
+                item["view_once"] = "off"
+                migration_needed = True
+            else:
+                normalized_view_once = normalize_view_once(item["view_once"])
+                if normalized_view_once != item["view_once"]:
+                    item["view_once"] = normalized_view_once
+                    migration_needed = True
             if "exclusions" in item:
                 original_exclusions = list(item.get("exclusions", []))
                 filtered_exclusions = [
@@ -119,7 +129,7 @@ class BotConfigStore:
                 copy_outgoing=bool(item.get("copy_outgoing", True)),
                 store_edits=bool(item.get("store_edits", False)),
                 mark_target_unread=bool(item.get("mark_target_unread", False)),
-                view_once_only=bool(item.get("view_once_only", False)),
+                view_once=normalize_view_once(item.get("view_once", "off")),
             )
             for item in listeners
         }
@@ -202,7 +212,7 @@ class BotConfigStore:
         source_chat: ChatRef,
         target_chats: list[ChatRef],
         name_prefix: bool | None = None,
-        view_once_only: bool | None = None,
+        view_once: str | None = None,
     ) -> tuple[ListenerRule, list[ChatRef]]:
         """Creates or extends a listener for one source chat without duplicating targets."""
         existing = self._listeners.get(source_chat.chat_id)
@@ -229,7 +239,7 @@ class BotConfigStore:
             copy_outgoing=existing.copy_outgoing if existing else True,
             store_edits=existing.store_edits if existing else False,
             mark_target_unread=existing.mark_target_unread if existing else False,
-            view_once_only=(existing.view_once_only if existing else False) if view_once_only is None else view_once_only,
+            view_once=(existing.view_once if existing else "off") if view_once is None else view_once,
         )
         self._listeners[source_chat.chat_id] = rule
         self.save()

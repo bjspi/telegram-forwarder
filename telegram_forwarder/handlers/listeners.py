@@ -72,9 +72,10 @@ def register_forward_handlers(app: Client, store: BotConfigStore, forward_index:
                 return
             if not passes_view_once_filter(message, rule):
                 logging.info(
-                    "Message %s in %s skipped by view-once filter (view_once_only=true, message is not view-once media).",
+                    "Message %s in %s skipped by view-once filter (view_once=%s).",
                     message.id,
                     message.chat.id,
+                    rule.view_once,
                 )
                 return
             await copy_or_replace_message(client, message, rule, forward_index)

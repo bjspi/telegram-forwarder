@@ -41,7 +41,7 @@
 - **Two-stage copy fallback** — tries Telegram's native `copy` first; when that is blocked, it transparently downloads and re-uploads the media as a fresh message.
 - **Edit propagation** — edits to a source message are mirrored into all targets; optionally the *full edit history* is rendered into the message (`store_edits`).
 - **Direction filters & exclusions** — forward only incoming, only outgoing, or both (`copy_incoming` / `copy_outgoing`); skip messages matching `fnmatch` patterns.
-- **View-once mode** — a per-chat toggle (`view_once_only`) that forwards *only* self-destructing view-once media: view-once photos & videos and listen-once voice/video notes. They are archived as regular, persistent media in the target chat before they can burn.
+- **View-once mode** — a per-chat setting (`view_once`) for self-destructing media (view-once photos & videos, listen-once voice/video notes): `off` skips them, `on` forwards them alongside everything else, `only` forwards *nothing but* them. In `on`/`only` they are archived as regular, persistent media in the target chat before they can burn.
 - **Sender attribution** — optionally prefix copied text with the original sender's name (`--name-prefix`).
 - **Read-state mirroring** — when you read a source chat, its targets are marked read too; optionally targets are flagged *unread* on fresh copies (`mark_target_unread`).
 - **Daily keep-alives** — per-chat daily messages with a random time offset, message pools, and `{timestamp}` / `{date}` / `{time}` placeholders.
@@ -171,7 +171,7 @@ Listener and keep-alive rules live in `bot_config.json`. It is normally managed 
       "copy_outgoing": true,
       "store_edits": false,
       "mark_target_unread": false,
-      "view_once_only": false        // true = forward ONLY view-once media
+      "view_once": "off"             // "off" skip · "on" include · "only" exclusive
     }
   ],
   "keepalives": [
@@ -205,7 +205,7 @@ With `ENABLE_CHAT_COMMANDS=true` (the default), the bot is controlled from your 
 | `/show_id` | Show the current chat id. |
 | `/list_chats` | List the 20 most recent chats with type, name and id. |
 | `/config` · `/config <source>` · `/config all` | Show listener configuration. |
-| `/copy <target> [more...] [--name-prefix] [--view-once-only]` | Use the current chat as source and add targets. |
+| `/copy <target> [more...] [--name-prefix] [--view-once=off\|on\|only]` | Use the current chat as source and add targets. |
 | `/copy <source> <target> [more...]` | Create a rule from any chat. |
 | `/stop` · `/stop <source>` · `/stop <source> <target>` | Remove listeners or single connections. |
 | `/keepalive [HH:MM:SS]` · `/keepalive pause` · `/keepalive off` | Manage the chat's daily keep-alive. |
