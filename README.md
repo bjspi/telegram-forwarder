@@ -30,6 +30,7 @@
   - [Runtime config (bot_config.json)](#runtime-config-bot_configjson)
   - [Headless mode (no chat commands)](#headless-mode-no-chat-commands)
 - [Chat Commands](#chat-commands)
+  - [Restricting commands to one chat](#restricting-commands-to-one-chat)
 - [Architecture](#architecture)
 - [Reliability](#reliability)
 - [Development](#development)
@@ -149,6 +150,7 @@ Everything an operator tunes lives in `.env` — every variable is documented in
 | --- | --- | --- |
 | `TG_ACCOUNT`, `TG_PHONE_NR`, `TG_API_ID`, `TG_API_HASH` | — | **Required** Telegram credentials; startup aborts with a clear error if missing. |
 | `ENABLE_CHAT_COMMANDS` | `true` | Master switch for all slash commands (see [headless mode](#headless-mode-no-chat-commands)). |
+| `COMMANDS_CHAT_ID` | `0` | Restrict commands to a single chat id; `0` = every chat (see [command scope](#restricting-commands-to-one-chat)). |
 | `TIMEZONE` | `Europe/Berlin` | Keep-alive scheduling and log timestamps. |
 | `DELETE_DELAY_SECONDS` | `5` | Auto-delete delay for command replies. |
 | `FORWARD_RECORD_TTL_SECONDS` | `86400` | How long source→target mappings are kept for edit propagation. |
@@ -211,6 +213,18 @@ With `ENABLE_CHAT_COMMANDS=true` (the default), the bot is controlled from your 
 | `/keepalive [HH:MM:SS]` · `/keepalive pause` · `/keepalive off` | Manage the chat's daily keep-alive. |
 
 **Scheduled commands:** commands sent from Telegram's scheduled-messages view are answered *back into the scheduled queue* — the reply stays visible for 30 seconds, starts with `(AutoDelete in 30s)`, and is then removed together with the command, so it never reaches the chat partner.
+
+### Restricting commands to one chat
+
+By default the command handlers listen in **every** chat (as long as *you* send the slash command). If you'd rather keep them out of your normal conversations, point `COMMANDS_CHAT_ID` at a single chat — typically a **private group containing only yourself** — and the handlers are registered *scoped to that chat only*:
+
+```dotenv
+COMMANDS_CHAT_ID=-1001234567890
+```
+
+Now `/copy`, `/stop`, `/keepalive` etc. only do anything in that one group; the same slash command typed anywhere else is left completely untouched. Forwarding, keep-alives and everything else keep working across all configured chats regardless. To find the id, run `/show_id` in the target group. Set it back to `0` to allow commands everywhere again.
+
+> **How to make a group with just yourself:** create a new group, add any contact, then remove them again — Telegram keeps the group with you as the only member. It's the tidiest command console for a userbot.
 
 ## Architecture
 

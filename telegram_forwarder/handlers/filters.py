@@ -10,6 +10,7 @@ Pyrogram variant, so we defensively build our own predicates.
 
 from __future__ import annotations
 from pyrogram import filters
+from ..settings import COMMANDS_CHAT_ID
 
 SCHEDULED_FILTER = filters.create(
     lambda _, __, m: bool(getattr(m, "scheduled", False)),
@@ -25,3 +26,9 @@ FROM_SCHEDULED_FILTER = filters.create(
 # leaks through to the chat partner. filters.me gates all commands to the
 # own account (userbot rule).
 CMD_BASE = filters.me & ~FROM_SCHEDULED_FILTER
+
+# Optionally scope every command to a single chat (e.g. a private group with
+# just yourself), so slash commands only work there and stay out of every
+# other conversation. COMMANDS_CHAT_ID=0 keeps the default (commands anywhere).
+if COMMANDS_CHAT_ID:
+    CMD_BASE = CMD_BASE & filters.chat(COMMANDS_CHAT_ID)

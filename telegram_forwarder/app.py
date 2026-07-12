@@ -29,6 +29,7 @@ from .logging_setup import configure_logging, ensure_runtime_directories
 from .services.enrichment import enrich_keepalive_chat_names, enrich_listener_chat_names
 from .services.keepalive import sync_keepalive_jobs
 from .settings import (
+    COMMANDS_CHAT_ID,
     CONFIG_PATH,
     ENABLE_CHAT_COMMANDS,
     HEALTH_CHECK_INTERVAL_SECONDS,
@@ -93,6 +94,10 @@ async def main() -> None:
     # group. Commands must be registered before the catch-all listener.
     if ENABLE_CHAT_COMMANDS:
         register_command_handlers(app, store, scheduler)
+        if COMMANDS_CHAT_ID:
+            logging.info("Chat commands enabled, restricted to chat %s.", COMMANDS_CHAT_ID)
+        else:
+            logging.info("Chat commands enabled in all chats.")
     else:
         logging.info(
             "Chat commands disabled (ENABLE_CHAT_COMMANDS=false). "
