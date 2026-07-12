@@ -1,0 +1,59 @@
+# Project + static-check config for the Telegram Forwarder userbot.
+#
+# Run from checkout:  python bot.py          (no install needed)
+# Or install it:      pip install -e .       (provides the `telegram-forwarder` command)
+#
+# Static checks:      pip install ruff mypy
+#                     ruff check bot.py telegram_forwarder   &&   mypy bot.py telegram_forwarder
+#                     (or just run  static_code_check.bat  on Windows)
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "telegram-forwarder"
+version = "1.0.0"
+description = "Self-healing Telegram userbot that mirrors messages between chats — even from copy-protected channels"
+readme = "README.md"
+requires-python = ">=3.12"
+dynamic = ["dependencies"]
+
+[project.scripts]
+telegram-forwarder = "telegram_forwarder.app:run"
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+[tool.setuptools.packages.find]
+include = ["telegram_forwarder*"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+extend-exclude = ["session", "logs", "data", "downloads", "__pycache__"]
+
+[tool.ruff.lint]
+# Bug-focused rule set: pyflakes (F) + bugbear (B) catch real bugs;
+# E/W basic correctness; I import order; UP/C4 modernizations.
+select = ["E", "F", "W", "I", "B", "UP", "C4"]
+ignore = [
+    "E501",   # line length is style, not a bug (line-length above is a soft cap)
+    "B008",   # function call in argument defaults (we use field(default_factory=...))
+]
+
+[tool.ruff.lint.isort]
+# One compact import block: no blank lines between stdlib/third-party/first-party.
+no-lines-before = ["standard-library", "third-party", "first-party", "local-folder"]
+known-first-party = ["telegram_forwarder"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true      # pyrogram/apscheduler/dotenv have no stubs
+check_untyped_defs = true          # type-check function bodies too (more bug coverage)
+warn_redundant_casts = true
+warn_unused_configs = true
+no_implicit_optional = true
+disallow_untyped_defs = false      # ctx: Any (duck-typed runtime context) is intentional
+explicit_package_bases = true
+exclude = "(^|/)(session|logs|data|downloads)/"

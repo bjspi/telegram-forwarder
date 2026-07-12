@@ -1,0 +1,4 @@
+apscheduler>=3.10
+pyrotgfork>=2.2
+python-dotenv>=1.0
+tgcrypto>=1.2

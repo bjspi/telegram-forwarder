@@ -1,0 +1,31 @@
+# Pyrogram session files (contain login secrets)
+session/
+*.session
+*.session-journal
+
+# Local credentials
+.env
+
+# Runtime config and logs
+bot_config.json
+logs/
+
+# Pyrogram media downloads
+downloads/
+
+# Local dev tooling (not part of the published repo)
+CLAUDE.md
+static_code_check.bat
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# IDEs
+.idea/
+.vscode/
