@@ -21,6 +21,7 @@ from pyrogram import idle
 from pyrogram.errors import RPCError
 from .connection.client import create_client, patch_pyrogram_dialog_compat
 from .connection.health import health_check_tick
+from .control_bot.service import configure_bot_commands, create_control_bot
 from .core.config_store import BotConfigStore
 from .core.forward_index import ForwardIndex
 from .handlers.commands import register_command_handlers
@@ -106,6 +107,8 @@ async def main() -> None:
     forward_index = ForwardIndex()
     register_forward_handlers(app, store, forward_index)
 
+    control_bot = create_control_bot(store, scheduler, app)
+
     while True:
         try:
             await app.start()
@@ -118,6 +121,16 @@ async def main() -> None:
             if not scheduler.running:
                 scheduler.start()
                 logging.info("Scheduler started. Timezone: %s", store.timezone)
+
+            if control_bot is not None and not control_bot.is_connected:
+                try:
+                    await control_bot.start()
+                    await configure_bot_commands(control_bot)
+                    logging.info("Control bot started.")
+                except Exception:
+                    # A bad token must not take the userbot down — disable and go on.
+                    logging.exception("Control bot failed to start; continuing without it.")
+                    control_bot = None
 
             await idle()
             break
@@ -141,6 +154,11 @@ async def main() -> None:
             error_path.write_text(traceback.format_exc(), encoding="utf-8")
             break
         finally:
+            if control_bot is not None and control_bot.is_connected:
+                try:
+                    await control_bot.stop()
+                except Exception:
+                    logging.exception("Control bot could not be stopped during cleanup.")
             if app.is_connected:
                 try:
                     await app.stop()

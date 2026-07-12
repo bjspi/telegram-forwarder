@@ -94,6 +94,13 @@ ENABLE_CHAT_COMMANDS = _env_bool("ENABLE_CHAT_COMMANDS", True)
 # /show_id. Only relevant when ENABLE_CHAT_COMMANDS=true.
 COMMANDS_CHAT_ID = _env_int("COMMANDS_CHAT_ID", 0)
 
+# Optional control bot: a separate BotFather bot that exposes an inline-button
+# menu to toggle listener/keep-alive settings. Empty token = disabled. It only
+# talks to CONTROL_BOT_OWNER_ID (your own numeric user id) and refuses to start
+# without one, so nobody else can control the userbot.
+CONTROL_BOT_TOKEN = _env_str("CONTROL_BOT_TOKEN", "")
+CONTROL_BOT_OWNER_ID = _env_int("CONTROL_BOT_OWNER_ID", 0)
+
 # Auto-delete for slash-command replies
 DELETE_DELAY_SECONDS = _env_int("DELETE_DELAY_SECONDS", 5)
 LIST_CHATS_DELETE_DELAY_SECONDS = _env_int("LIST_CHATS_DELETE_DELAY_SECONDS", 20)

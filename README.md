@@ -31,6 +31,7 @@
   - [Headless mode (no chat commands)](#headless-mode-no-chat-commands)
 - [Chat Commands](#chat-commands)
   - [Restricting commands to one chat](#restricting-commands-to-one-chat)
+- [Control Bot](#control-bot)
 - [Architecture](#architecture)
 - [Reliability](#reliability)
 - [Development](#development)
@@ -49,6 +50,7 @@
 - **Hot-reload** — `bot_config.json` is reloaded on change without a restart; a corrupt edit never crashes the bot.
 - **Self-healing** — active health-check with hard-exit for supervisor restarts, plus a two-layer reconnect strategy.
 - **Scheduled commands** — slash commands work from Telegram's scheduled-messages view, with replies that never leak to the chat partner.
+- **Optional control bot** — a separate BotFather bot with an inline-button menu to review the config and toggle per-chat settings (direction, view-once, keep-alive, …) from anywhere — locked to your own user id.
 - **Fully headless if you want** — one env switch disables all chat commands; the bot then runs purely off the JSON config.
 
 ## How It Works
@@ -151,6 +153,7 @@ Everything an operator tunes lives in `.env` — every variable is documented in
 | `TG_ACCOUNT`, `TG_PHONE_NR`, `TG_API_ID`, `TG_API_HASH` | — | **Required** Telegram credentials; startup aborts with a clear error if missing. |
 | `ENABLE_CHAT_COMMANDS` | `true` | Master switch for all slash commands (see [headless mode](#headless-mode-no-chat-commands)). |
 | `COMMANDS_CHAT_ID` | `0` | Restrict commands to a single chat id; `0` = every chat (see [command scope](#restricting-commands-to-one-chat)). |
+| `CONTROL_BOT_TOKEN` / `CONTROL_BOT_OWNER_ID` | — | Optional BotFather control bot and its sole owner (see [Control Bot](#control-bot)). |
 | `TIMEZONE` | `Europe/Berlin` | Keep-alive scheduling and log timestamps. |
 | `DELETE_DELAY_SECONDS` | `5` | Auto-delete delay for command replies. |
 | `FORWARD_RECORD_TTL_SECONDS` | `86400` | How long source→target mappings are kept for edit propagation. |
@@ -226,6 +229,29 @@ Now `/copy`, `/stop`, `/keepalive` etc. only do anything in that one group; the 
 
 > **How to make a group with just yourself:** create a new group, add any contact, then remove them again — Telegram keeps the group with you as the only member. It's the tidiest command console for a userbot.
 
+## Control Bot
+
+Optionally, a **separate BotFather bot** gives you an inline-button menu to inspect the configuration and flip per-chat settings — no need to type slash commands into a chat. It runs alongside the userbot in the same process and edits the same live config, so changes take effect immediately.
+
+Set it up with two variables:
+
+```dotenv
+CONTROL_BOT_TOKEN=123456:ABC-DEF...      # from @BotFather
+CONTROL_BOT_OWNER_ID=123456789           # your own numeric user id
+```
+
+Then send `/menu` to your bot. Every screen is **locked to `CONTROL_BOT_OWNER_ID`** — the bot ignores everyone else, and it refuses to start at all if no owner is set. The menu lets you:
+
+- **📊 Overview** — the full listener + keep-alive configuration at a glance.
+- **📡 Listeners** — pick any configured source chat and toggle, with live ✅ state on every button:
+  - **Direction** — incoming · outgoing · both
+  - **View-once media** — off · on · only
+  - **Name prefix**, **Store edits**, **Mark target unread**
+  - **Keep-alive** — enable/disable the chat's daily ping (if one exists)
+- **⏰ Keep-alives** — enable or disable each keep-alive with one tap.
+
+The control bot also registers its own command menu (`/menu`, `/start`) via the Bot API, so the commands show up in Telegram's UI. It's a pure *controller*: it edits existing rules — creating brand-new listeners/keep-alives is still done with the userbot's `/copy` and `/keepalive` commands (or by editing `bot_config.json`).
+
 ## Architecture
 
 `bot.py` is a thin entry point; the application is the `telegram_forwarder` package right next to it (flat layout, same pattern as yt-dlp or HTTPie) — so both *clone & run* and *pip/pipx install* work naturally.
@@ -235,8 +261,10 @@ flowchart TD
     B["bot.py — entry point"] --> A["app.py — composition root + run loop"]
     A --> H["handlers/<br/>commands · listeners · filters"]
     A --> C["connection/<br/>client · chats · health"]
+    A --> CB["control_bot/<br/>client · keyboards · views · handlers"]
     H --> S["services/<br/>forwarding · keepalive · enrichment"]
     H --> U["ui/<br/>formatting · replies"]
+    CB --> K
     S --> K["core/<br/>models · config_store · forward_index · rules · naming"]
     C --> K
     U --> K
@@ -253,6 +281,7 @@ telegram_forwarder/
 ├── connection/               # Pyrogram client factory, chat resolution, health check
 ├── services/                 # forwarding pipeline, keep-alive scheduling, name enrichment
 ├── handlers/                 # Pyrogram handlers: slash commands + message listeners
+├── control_bot/              # optional BotFather bot: inline-menu config UI
 └── ui/                       # reply formatting and auto-delete replies
 ```
 

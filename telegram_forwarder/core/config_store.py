@@ -252,6 +252,36 @@ class BotConfigStore:
             self.save()
         return rule
 
+    def set_listener_option(self, source_chat_id: int, option: str, value: object) -> ListenerRule | None:
+        """Sets one listener option (view_once or a boolean flag) and persists on change.
+
+        Supported options: ``view_once`` (normalized to off/on/only) and the
+        boolean flags ``name_prefix``, ``store_edits``, ``mark_target_unread``.
+        Used by the control bot's inline menu. Returns the updated rule, or None
+        if the listener does not exist.
+        """
+        rule = self._listeners.get(source_chat_id)
+        if rule is None:
+            return None
+        if option == "view_once":
+            rule.view_once = normalize_view_once(value)
+        elif option in ("name_prefix", "store_edits", "mark_target_unread"):
+            setattr(rule, option, bool(value))
+        else:
+            raise ValueError(f"Unknown listener option: {option}")
+        self.save()
+        return rule
+
+    def set_listener_direction(self, source_chat_id: int, copy_incoming: bool, copy_outgoing: bool) -> ListenerRule | None:
+        """Sets the copy direction flags for one listener and persists."""
+        rule = self._listeners.get(source_chat_id)
+        if rule is None:
+            return None
+        rule.copy_incoming = copy_incoming
+        rule.copy_outgoing = copy_outgoing
+        self.save()
+        return rule
+
     def remove_listener_targets(self, source_chat_id: int, target_chat_ids: list[int]) -> tuple[ListenerRule | None, list[ChatRef]]:
         """Removes selected targets from one source listener and deletes the listener if empty."""
         rule = self._listeners.get(source_chat_id)
