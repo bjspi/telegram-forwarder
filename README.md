@@ -310,3 +310,18 @@ Both tools are configured in [`pyproject.toml`](pyproject.toml). Project convent
 
 > [!NOTE]
 > This is a **userbot**: it logs in with your own Telegram account via the MTProto API. Use it responsibly and in accordance with [Telegram's Terms of Service](https://telegram.org/tos) — aggressive automation can get accounts limited.
+
+## Network outage behaviour
+
+This host sits on a home connection, so a WAN outage is routine. All bots on it
+follow the same schema (see `_template_/CLAUDE.md`):
+
+- Connecting never gives up after N attempts - Pyrogram keeps reconnecting.
+- The health watchdog gives up on a **duration** (900s of continuous failure),
+  never on a plain failure count: a counter would restart the process every few
+  minutes through an hours-long outage and gain nothing by it.
+- Giving up means a hard exit for the supervisor, not silently running on.
+- Transient errors are logged throttled but never invisibly: a window in which
+  the bot receives nothing has to be visible in the log.
+
+This bot already implemented all of it; the note pins the contract.
