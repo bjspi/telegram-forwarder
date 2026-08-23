@@ -50,7 +50,7 @@
 - **Hot-reload** — `bot_config.json` is reloaded on change without a restart; a corrupt edit never crashes the bot.
 - **Self-healing** — active health-check with hard-exit for supervisor restarts, plus a two-layer reconnect strategy.
 - **Scheduled commands** — slash commands work from Telegram's scheduled-messages view, with replies that never leak to the chat partner.
-- **Optional control bot** — a separate BotFather bot with an inline-button menu to review the config, toggle per-chat settings (direction, view-once, keep-alive, …) and add new rules by picking from your recent chats — all locked to your own user id.
+- **Optional control bot** — a separate BotFather bot with an inline-button menu: live status with connection health, pause/resume whole listeners or individual targets, toggle per-chat settings (direction, view-once, keep-alive, …), change keep-alive times, and add or delete rules by picking from your recent chats — all locked to your own user id.
 - **Fully headless if you want** — one env switch disables all chat commands; the bot then runs purely off the JSON config.
 
 ## How It Works
@@ -242,18 +242,20 @@ CONTROL_BOT_OWNER_ID=123456789           # your own numeric user id
 
 Then send `/menu` to your bot. Every screen is **locked to `CONTROL_BOT_OWNER_ID`** — the bot ignores everyone else, and it refuses to start at all if no owner is set. The menu lets you:
 
-- **📊 Overview** — the full listener + keep-alive configuration at a glance.
-- **📡 Listeners** — pick any configured source chat and toggle, with live ✅ state on every button:
+- **📊 Status** (also directly via `/status`) — connection health (time since the last successful Telegram check) plus every listener and keep-alive with its live ▶️/⏸ state, target counts and settings — with a 🔄 Refresh button.
+- **📡 Listeners** — every source chat as a button with its ▶️/⏸ state and target count. Inside a listener:
+  - **⏸ Pause / ▶️ Resume** — a master switch per listener; a paused listener keeps all its settings but forwards nothing.
+  - **🎯 Targets** — manage each target individually: pause/resume it with one tap (reversible, the reference is kept), 🗑 remove it for good (with a confirm screen), or **➕ Add target** via the recent-chats picker.
   - **Direction** — incoming · outgoing · both
   - **View-once media** — off · on · only
   - **Name prefix**, **Store edits**, **Mark target unread**
   - **Keep-alive** — enable/disable the chat's daily ping (if one exists)
-  - **➕ Add listener** — build a new rule (see below)
-- **⏰ Keep-alives** — enable or disable each keep-alive with one tap, or **➕ Add keep-alive**.
+  - **🗑 Delete listener** — remove the whole rule, behind a confirm screen
+- **⏰ Keep-alives** — per row: toggle with one tap, **🕒 change the time**, or **🗑 delete** (with confirm). **➕ Add keep-alive** builds a new one.
 
-**Creating rules from the menu:** *Add listener* and *Add keep-alive* walk you through a short flow. For each chat you either **pick from your 20 most recently active chats** (the userbot fetches them live — no need to remember ids) or **type a chat id / @username**, which is verified by resolving it before anything is saved. Keep-alive times are entered as `HH:MM:SS` and validated. Everything else — targets, message pools, exclusions — is still configured with the userbot's `/copy` / `/keepalive` commands or by editing `bot_config.json`.
+**Creating rules from the menu:** *Add listener*, *Add target* and *Add keep-alive* walk you through a short flow. For each chat you either **pick from your 20 most recently active chats** (the userbot fetches them live — no need to remember ids) or **type a chat id / @username**, which is verified by resolving it before anything is saved. Keep-alive times are entered as `HH:MM:SS` and validated. **Destructive actions always show a confirm screen first** — and wherever pausing would do, the confirm text says so. Message pools and exclusions are still configured with the userbot's commands or by editing `bot_config.json`.
 
-The control bot also registers its own command menu (`/menu`, `/start`) via the Bot API, so the commands show up in Telegram's UI.
+The control bot also registers its own command menu (`/menu`, `/status`, `/start`) via the Bot API, so the commands show up in Telegram's UI.
 
 ## Architecture
 

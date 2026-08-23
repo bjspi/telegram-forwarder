@@ -27,11 +27,25 @@ class ListenerRule:
     store_edits: bool = False
     mark_target_unread: bool = False
     view_once: str = "off"
+    enabled: bool = True
+    # Individually paused targets. Kept separate from target_chats so pausing
+    # is reversible without losing the chat reference.
+    disabled_target_ids: list[int] = field(default_factory=list)
 
     @property
     def target_chat_ids(self) -> list[int]:
         """Returns target chat ids for the listener."""
         return [target.chat_id for target in self.target_chats]
+
+    @property
+    def active_target_chat_ids(self) -> list[int]:
+        """Returns target chat ids that are not individually paused."""
+        paused = set(self.disabled_target_ids)
+        return [target.chat_id for target in self.target_chats if target.chat_id not in paused]
+
+    def is_target_active(self, target_chat_id: int) -> bool:
+        """Returns whether one target participates in forwarding."""
+        return target_chat_id not in self.disabled_target_ids
 
 
 @dataclass(slots=True)

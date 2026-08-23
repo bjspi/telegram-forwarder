@@ -6,16 +6,19 @@ view or change anything. All config mutations go through the shared
 ``BotConfigStore``, so the userbot picks them up on its next message; keep-alive
 changes also rebuild the scheduler jobs immediately.
 
-Adding a listener or keep-alive is a small multi-step flow (see :mod:`.state`):
-the owner either picks a chat from their most recently active chats (fetched
-live through the userbot) or types a chat id / @username, which is verified by
-resolving it; keep-alive times are verified as ``HH:MM:SS``.
+Adding a listener, target or keep-alive is a small multi-step flow (see
+:mod:`.state`): the owner either picks a chat from their most recently active
+chats (fetched live through the userbot) or types a chat id / @username, which
+is verified by resolving it; keep-alive times are verified as ``HH:MM:SS``.
+Destructive actions (deleting a listener, removing a target, deleting a
+keep-alive) always go through an explicit confirm screen first.
 """
 
 from __future__ import annotations
 import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from pyrogram import Client, filters
+from pyrogram.errors import MessageNotModified
 from pyrogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from ..connection.chats import get_recent_chats, resolve_chat_ref
 from ..core.config_store import BotConfigStore
@@ -24,10 +27,13 @@ from ..services.keepalive import parse_hms, sync_keepalive_jobs
 from ..settings import CONTROL_BOT_OWNER_ID
 from .keyboards import (
     cancel_keyboard,
+    confirm_keyboard,
     keepalives_keyboard,
     listener_detail_keyboard,
+    listener_targets_keyboard,
     listeners_keyboard,
     main_menu_keyboard,
+    overview_keyboard,
     recent_chats_keyboard,
 )
 from .state import (
@@ -44,12 +50,18 @@ from .views import (
     ADD_KEEPALIVE_TIME_TEXT,
     ADD_LISTENER_SOURCE_TEXT,
     ADD_LISTENER_TARGET_TEXT,
+    ADD_TARGET_TEXT,
     MAIN_MENU_TEXT,
     TYPE_CHAT_TEXT,
+    render_delete_keepalive_text,
+    render_delete_listener_text,
+    render_edit_keepalive_time_text,
     render_keepalives_text,
     render_listener_detail_text,
+    render_listener_targets_text,
     render_listeners_text,
     render_overview_text,
+    render_remove_target_text,
 )
 
 Screen = tuple[str, InlineKeyboardMarkup]
@@ -73,6 +85,21 @@ def register_control_handlers(
             return None
         keepalive = store.get_keepalive(source_chat_id)
         return render_listener_detail_text(rule, keepalive), listener_detail_keyboard(rule, keepalive)
+
+    def listener_targets(source_chat_id: int) -> Screen | None:
+        """Renders one listener's targets screen, or None if it no longer exists."""
+        rule = store.get_listener(source_chat_id)
+        if rule is None:
+            return None
+        return render_listener_targets_text(rule), listener_targets_keyboard(rule)
+
+    def keepalives_screen() -> Screen:
+        """Renders the keep-alives list screen."""
+        return render_keepalives_text(store), keepalives_keyboard(store)
+
+    def listeners_screen() -> Screen:
+        """Renders the listeners list screen."""
+        return render_listeners_text(store), listeners_keyboard(store)
 
     def apply_chat_choice(user_id: int, action: PendingAction, chosen: ChatRef) -> Screen | None:
         """Advances a pending flow with a chosen/verified chat and returns the next screen."""
@@ -104,11 +131,11 @@ def register_control_handlers(
             pending.pop(user_id, None)
             return MAIN_MENU_TEXT, main_menu_keyboard()
         if data == "ov":
-            return render_overview_text(store), main_menu_keyboard()
+            return render_overview_text(store), overview_keyboard()
         if data == "lst":
-            return render_listeners_text(store), listeners_keyboard(store)
+            return listeners_screen()
         if data == "kal":
-            return render_keepalives_text(store), keepalives_keyboard(store)
+            return keepalives_screen()
 
         if data == "ladd":
             recent = await get_recent_chats(userbot, RECENT_CHATS_LIMIT)
@@ -122,8 +149,8 @@ def register_control_handlers(
         if data == "cancel":
             action = pending.pop(user_id, None)
             if action is not None and action.kind == KIND_KEEPALIVE:
-                return render_keepalives_text(store), keepalives_keyboard(store)
-            return render_listeners_text(store), listeners_keyboard(store)
+                return keepalives_screen()
+            return listeners_screen()
 
         if data == "typ":
             action = pending.get(user_id)
@@ -145,6 +172,10 @@ def register_control_handlers(
         if head == "l":
             return listener_detail(int(parts[1]))
 
+        if head == "le":
+            rule = store.toggle_listener_enabled(int(parts[1]))
+            return listener_detail(rule.source_chat_id) if rule is not None else listeners_screen()
+
         if head == "ls":
             source_chat_id, option, value = int(parts[1]), parts[2], parts[3]
             store.set_listener_option(source_chat_id, option, value if option == "view_once" else value == "1")
@@ -159,13 +190,88 @@ def register_control_handlers(
             )
             return listener_detail(source_chat_id)
 
+        if head == "lt":
+            return listener_targets(int(parts[1]))
+
+        if head == "lti":
+            source_chat_id, target_chat_id = int(parts[1]), int(parts[2])
+            store.toggle_listener_target_active(source_chat_id, target_chat_id)
+            return listener_targets(source_chat_id)
+
+        if head == "ltr":
+            source_chat_id, target_chat_id = int(parts[1]), int(parts[2])
+            rule = store.get_listener(source_chat_id)
+            target = next((chat for chat in rule.target_chats if chat.chat_id == target_chat_id), None) if rule else None
+            if rule is None or target is None:
+                return listener_targets(source_chat_id) or listeners_screen()
+            return (
+                render_remove_target_text(rule, target),
+                confirm_keyboard(f"ltr2|{source_chat_id}|{target_chat_id}", f"lt|{source_chat_id}"),
+            )
+
+        if head == "ltr2":
+            source_chat_id, target_chat_id = int(parts[1]), int(parts[2])
+            store.remove_listener_targets(source_chat_id, [target_chat_id])
+            # Removing the last target removes the whole listener.
+            return listener_targets(source_chat_id) or listeners_screen()
+
+        if head == "tadd":
+            source_chat_id = int(parts[1])
+            rule = store.get_listener(source_chat_id)
+            if rule is None:
+                return listeners_screen()
+            recent = await get_recent_chats(userbot, RECENT_CHATS_LIMIT)
+            pending[user_id] = PendingAction(
+                kind=KIND_LISTENER,
+                step=STEP_TARGET,
+                recent=recent,
+                source=ChatRef(rule.source_chat_id, rule.source_chat_name),
+            )
+            return ADD_TARGET_TEXT, recent_chats_keyboard(recent)
+
+        if head == "ldel":
+            rule = store.get_listener(int(parts[1]))
+            if rule is None:
+                return listeners_screen()
+            return (
+                render_delete_listener_text(rule),
+                confirm_keyboard(f"ldel2|{rule.source_chat_id}", f"l|{rule.source_chat_id}"),
+            )
+
+        if head == "ldel2":
+            store.remove_listener(int(parts[1]))
+            return listeners_screen()
+
         if head == "k":
             chat_id, return_to = int(parts[1]), (parts[2] if len(parts) > 2 else "kal")
             store.toggle_keepalive_enabled(chat_id)
             sync_keepalive_jobs(scheduler, store, userbot)
             if return_to == "l":
                 return listener_detail(chat_id)
-            return render_keepalives_text(store), keepalives_keyboard(store)
+            return keepalives_screen()
+
+        if head == "kt":
+            keepalive = store.get_keepalive(int(parts[1]))
+            if keepalive is None:
+                return keepalives_screen()
+            pending[user_id] = PendingAction(
+                kind=KIND_KEEPALIVE,
+                step=STEP_TIME,
+                source=ChatRef(keepalive.chat_id, keepalive.chat_name),
+                awaiting_text=True,
+            )
+            return render_edit_keepalive_time_text(keepalive), cancel_keyboard()
+
+        if head == "kdel":
+            keepalive = store.get_keepalive(int(parts[1]))
+            if keepalive is None:
+                return keepalives_screen()
+            return render_delete_keepalive_text(keepalive), confirm_keyboard(f"kdel2|{keepalive.chat_id}", "kal")
+
+        if head == "kdel2":
+            store.remove_keepalive(int(parts[1]))
+            sync_keepalive_jobs(scheduler, store, userbot)
+            return keepalives_screen()
 
         return None
 
@@ -178,6 +284,15 @@ def register_control_handlers(
         except Exception:
             logging.exception("Control bot: failed to open the main menu.")
 
+    @bot.on_message(filters.command("status") & owner)
+    async def open_status(_: Client, message: Message) -> None:
+        """Shows the status screen directly, without going through the menu."""
+        try:
+            pending.pop(message.from_user.id, None)
+            await message.reply_text(render_overview_text(store), reply_markup=overview_keyboard())
+        except Exception:
+            logging.exception("Control bot: failed to open the status screen.")
+
     @bot.on_callback_query(owner)
     async def on_callback(_: Client, callback_query: CallbackQuery) -> None:
         """Routes an inline-button tap to the matching screen or config change."""
@@ -187,7 +302,11 @@ def register_control_handlers(
             await callback_query.answer()
             if screen is not None:
                 text, markup = screen
-                await callback_query.edit_message_text(text, reply_markup=markup)
+                try:
+                    await callback_query.edit_message_text(text, reply_markup=markup)
+                except MessageNotModified:
+                    # A refresh that renders the identical screen is fine.
+                    pass
         except Exception:
             logging.exception("Control bot: error handling callback %r.", data)
             try:

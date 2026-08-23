@@ -49,7 +49,9 @@ async def send_media_from_path(
     if media_type == "document":
         return await client.send_document(target_chat_id, path, caption=caption)
     if media_type == "photo":
-        return await client.send_photo(target_chat_id, path, caption=caption)
+        # pyrotgfork annotates `photo` as InputMediaPhoto only, but the
+        # implementation accepts a file path like every other send_* method.
+        return await client.send_photo(target_chat_id, path, caption=caption)  # type: ignore[arg-type]
     if media_type == "video":
         return await client.send_video(target_chat_id, path, caption=caption)
     if media_type == "audio":
@@ -246,7 +248,7 @@ async def copy_or_replace_message(
     target_message_ids = await copy_message_to_targets(
         client,
         message,
-        rule.target_chat_ids,
+        rule.active_target_chat_ids,
         name_prefix=rule.name_prefix,
         mark_target_unread=effective_mark_unread,
     )

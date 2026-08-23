@@ -48,6 +48,9 @@ def register_forward_handlers(app: Client, store: BotConfigStore, forward_index:
             rule = store.get_listener(message.chat.id)
             if rule is None:
                 return
+            if not rule.enabled:
+                logging.debug("Message %s in %s skipped: listener is paused.", message.id, message.chat.id)
+                return
             logging.info(
                 "New message %s detected in source %s (%s). Targets: %s | direction=%s | name_prefix=%s | text: %r",
                 message.id,
@@ -91,7 +94,7 @@ def register_forward_handlers(app: Client, store: BotConfigStore, forward_index:
         """
         try:
             rule = store.get_listener(message.chat.id)
-            if rule is None:
+            if rule is None or not rule.enabled:
                 return
             if (
                 should_exclude_message(message, rule)
@@ -145,17 +148,17 @@ def register_forward_handlers(app: Client, store: BotConfigStore, forward_index:
                 return
 
             rule = store.get_listener(source_chat_id)
-            if rule is None:
+            if rule is None or not rule.enabled:
                 return
 
             logging.info(
                 "Source %s (%s) was read, propagating read_chat_history to %d target(s).",
                 source_chat_id,
                 rule.source_chat_name or "unknown",
-                len(rule.target_chats),
+                len(rule.active_target_chat_ids),
             )
 
-            for target_chat_id in rule.target_chat_ids:
+            for target_chat_id in rule.active_target_chat_ids:
                 try:
                     await client.read_chat_history(target_chat_id)
                 except (OSError, TimeoutError, RPCError) as exc:

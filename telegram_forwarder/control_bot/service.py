@@ -40,6 +40,7 @@ async def configure_bot_commands(bot: Client) -> None:
     await bot.set_bot_commands(
         [
             BotCommand("menu", "Open the control menu"),
+            BotCommand("status", "Show health and rule status"),
             BotCommand("start", "Open the control menu"),
         ]
     )

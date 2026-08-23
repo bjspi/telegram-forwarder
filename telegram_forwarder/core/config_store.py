@@ -109,6 +109,12 @@ class BotConfigStore:
                 if normalized_view_once != item["view_once"]:
                     item["view_once"] = normalized_view_once
                     migration_needed = True
+            if "enabled" not in item:
+                item["enabled"] = True
+                migration_needed = True
+            if "disabled_target_ids" not in item:
+                item["disabled_target_ids"] = []
+                migration_needed = True
             if "exclusions" in item:
                 original_exclusions = list(item.get("exclusions", []))
                 filtered_exclusions = [
@@ -135,6 +141,8 @@ class BotConfigStore:
                 store_edits=bool(item.get("store_edits", False)),
                 mark_target_unread=bool(item.get("mark_target_unread", False)),
                 view_once=normalize_view_once(item.get("view_once", "off")),
+                enabled=bool(item.get("enabled", True)),
+                disabled_target_ids=[int(chat_id) for chat_id in item.get("disabled_target_ids", [])],
             )
             for item in listeners
         }
@@ -245,6 +253,8 @@ class BotConfigStore:
             store_edits=existing.store_edits if existing else False,
             mark_target_unread=existing.mark_target_unread if existing else False,
             view_once=(existing.view_once if existing else "off") if view_once is None else view_once,
+            enabled=existing.enabled if existing else True,
+            disabled_target_ids=list(existing.disabled_target_ids) if existing else [],
         )
         self._listeners[source_chat.chat_id] = rule
         self.save()
@@ -277,6 +287,32 @@ class BotConfigStore:
         self.save()
         return rule
 
+    def toggle_listener_enabled(self, source_chat_id: int) -> ListenerRule | None:
+        """Toggles the master switch of one listener and persists."""
+        rule = self._listeners.get(source_chat_id)
+        if rule is None:
+            return None
+        rule.enabled = not rule.enabled
+        self.save()
+        return rule
+
+    def toggle_listener_target_active(self, source_chat_id: int, target_chat_id: int) -> ListenerRule | None:
+        """Pauses or resumes one target of a listener and persists.
+
+        Only known targets can be toggled; the reference itself stays in
+        ``target_chats`` so pausing is reversible. Returns the updated rule, or
+        None if the listener or target does not exist.
+        """
+        rule = self._listeners.get(source_chat_id)
+        if rule is None or target_chat_id not in rule.target_chat_ids:
+            return None
+        if target_chat_id in rule.disabled_target_ids:
+            rule.disabled_target_ids.remove(target_chat_id)
+        else:
+            rule.disabled_target_ids.append(target_chat_id)
+        self.save()
+        return rule
+
     def set_listener_direction(self, source_chat_id: int, copy_incoming: bool, copy_outgoing: bool) -> ListenerRule | None:
         """Sets the copy direction flags for one listener and persists."""
         rule = self._listeners.get(source_chat_id)
@@ -299,6 +335,7 @@ class BotConfigStore:
             return rule, []
 
         remaining_targets = [target for target in rule.target_chats if target.chat_id not in removal_set]
+        rule.disabled_target_ids = [chat_id for chat_id in rule.disabled_target_ids if chat_id not in removal_set]
         if remaining_targets:
             rule.target_chats = remaining_targets
             self._listeners[source_chat_id] = rule

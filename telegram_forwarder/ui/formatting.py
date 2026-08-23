@@ -41,6 +41,22 @@ def format_keepalive_enabled_text(enabled: bool) -> str:
     return "" if enabled else " [paused]"
 
 
+def format_listener_targets(rule: ListenerRule) -> str:
+    """Formats a listener's targets, marking individually paused ones."""
+    parts: list[str] = []
+    for target in rule.target_chats:
+        text = format_chat_ref(target)
+        if not rule.is_target_active(target.chat_id):
+            text += " [paused]"
+        parts.append(text)
+    return ", ".join(parts)
+
+
+def format_listener_enabled_text(enabled: bool) -> str:
+    """Formats the enabled state for listener output."""
+    return "" if enabled else " [paused]"
+
+
 def format_listener_line(rule: ListenerRule) -> str:
     """Formats one listener rule for config output."""
     source_ref = ChatRef(rule.source_chat_id, rule.source_chat_name)
@@ -50,7 +66,8 @@ def format_listener_line(rule: ListenerRule) -> str:
     unread_text = f"mark_target_unread={int(rule.mark_target_unread)}"
     view_once_text = f"view_once={rule.view_once}"
     return (
-        f"{format_chat_ref(source_ref)} -> {format_chat_refs(rule.target_chats)} "
+        f"{format_chat_ref(source_ref)}{format_listener_enabled_text(rule.enabled)}"
+        f" -> {format_listener_targets(rule)} "
         f"| name_prefix={prefix_text} | {direction_text} | {edit_text} | {unread_text} | {view_once_text}"
     )
 
@@ -85,7 +102,8 @@ def get_status_text(store: BotConfigStore) -> str:
     listeners = store.all_listeners()
     keepalives = store.all_keepalives()
     listener_text = "none" if not listeners else ", ".join(
-        f"{format_chat_ref(ChatRef(rule.source_chat_id, rule.source_chat_name))}->{format_chat_refs(rule.target_chats)}"
+        f"{format_chat_ref(ChatRef(rule.source_chat_id, rule.source_chat_name))}"
+        f"{format_listener_enabled_text(rule.enabled)}->{format_listener_targets(rule)}"
         f"{' [name_prefix]' if rule.name_prefix else ''}"
         f"{' [mark_target_unread]' if rule.mark_target_unread else ''}"
         f"{f' [view_once={rule.view_once}]' if rule.view_once != 'off' else ''}"
@@ -142,6 +160,7 @@ def build_help_text(store: BotConfigStore) -> str:
         "- Listeners can also carry `copy_incoming` and `copy_outgoing` in the JSON.\n"
         "- Listeners can also carry `store_edits` in the JSON.\n"
         "- Listeners can also carry `mark_target_unread` in the JSON.\n"
+        "- Listeners can also carry `enabled` (master switch) and `disabled_target_ids` (individually paused targets) in the JSON; both are editable in the control bot.\n"
         "- `name_prefix` is off by default and can be enabled with `--name-prefix`.\n"
         "- `copy_incoming` and `copy_outgoing` both default to `true`.\n"
         "- `store_edits` defaults to `false`.\n"
