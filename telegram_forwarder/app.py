@@ -113,6 +113,7 @@ async def main() -> None:
         try:
             await app.start()
             store.last_healthy_at = time.monotonic()
+            store.telegram_down_wan_up_since = None
             logging.info("Userbot started.")
             await enrich_listener_chat_names(app, store)
             await enrich_keepalive_chat_names(app, store)

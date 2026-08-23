@@ -126,6 +126,9 @@ NETWORK_RETRY_DELAY_SECONDS = _env_int("NETWORK_RETRY_DELAY_SECONDS", 10)
 HEALTH_CHECK_INTERVAL_SECONDS = _env_int("HEALTH_CHECK_INTERVAL_SECONDS", 60)
 HEALTH_CHECK_TIMEOUT_SECONDS = _env_int("HEALTH_CHECK_TIMEOUT_SECONDS", 30)
 MAX_UNHEALTHY_DURATION_SECONDS = _env_int("MAX_UNHEALTHY_DURATION_SECONDS", 15 * 60)
+# Timeout per WAN probe request (generate_204 outage classification; the probe
+# only runs while the Telegram health check is already failing).
+WAN_PROBE_TIMEOUT_SECONDS = _env_int("WAN_PROBE_TIMEOUT_SECONDS", 5)
 
 # Default keep-alive text (with Pyrogram version) — internal only, overridable
 # per chat via bot_config.json; not in .env because it is dynamic.

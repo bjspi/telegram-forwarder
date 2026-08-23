@@ -33,6 +33,11 @@ class BotConfigStore:
         # time.monotonic() value of the last successful health check. Set to
         # "now" on startup and refreshed after every successful app.start().
         self.last_healthy_at: float = time.monotonic()
+        # time.monotonic() at which Telegram first failed a health check while
+        # the WAN probe still succeeded. None while healthy and during a WAN
+        # outage, which pauses the give-up clock (a restart cannot fix a dead
+        # line).
+        self.telegram_down_wan_up_since: float | None = None
 
     @property
     def timezone(self) -> str:

@@ -293,7 +293,7 @@ telegram_forwarder/
 Built to run unattended under a process supervisor (supervisord, systemd, NSSM, …):
 
 1. **Outer reconnect loop** — network/RPC errors during startup trigger a retry after `NETWORK_RETRY_DELAY_SECONDS`.
-2. **Active health check** — Pyrogram retries connection failures *internally* without ever raising, which can leave a bot silently dead. A periodic `get_me()` ping detects this; if the connection stays down longer than `MAX_UNHEALTHY_DURATION_SECONDS` (default 15 min), the process hard-exits (`os._exit(1)`) so the supervisor restarts it.
+2. **Active health check** — Pyrogram retries connection failures *internally* without ever raising, which can leave a bot silently dead. A periodic `get_me()` ping detects this. A failed ping triggers a WAN probe (Google's/Cloudflare's `generate_204` endpoints, contacted only while Telegram is already unreachable) that classifies the outage: **internet down** pauses the give-up clock — a restart cannot bring the line back — while **internet up, Telegram unreachable** lets it run. Only after `MAX_UNHEALTHY_DURATION_SECONDS` (default 15 min) of continuous Telegram-only failure does the process hard-exit (`os._exit(1)`) so the supervisor restarts it — the stuck-session case a restart actually fixes.
 3. **Crash forensics** — unexpected fatal errors are written to `logs/critical_error_*.txt`; daily logs rotate at midnight and expire after `LOG_RETENTION_DAYS`.
 
 ## Development
@@ -320,8 +320,10 @@ follow the same schema (see `_template_/CLAUDE.md`):
 - The health watchdog gives up on a **duration** (900s of continuous failure),
   never on a plain failure count: a counter would restart the process every few
   minutes through an hours-long outage and gain nothing by it.
+- A **WAN outage pauses the give-up clock**: the `generate_204` probe separates
+  "the line is dead" (wait it out) from "Telegram alone is unreachable" (a
+  restart plausibly helps). The probe only runs while the Telegram check is
+  already failing, so normal operation generates no extra traffic.
 - Giving up means a hard exit for the supervisor, not silently running on.
 - Transient errors are logged throttled but never invisibly: a window in which
   the bot receives nothing has to be visible in the log.
-
-This bot already implemented all of it; the note pins the contract.
