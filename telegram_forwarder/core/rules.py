@@ -92,3 +92,12 @@ def get_editable_content(message: Message) -> tuple[str, str]:
     if message.caption:
         return "caption", message.caption
     return "", ""
+
+
+def get_media_signature(message: Message) -> str:
+    """Stable media identity, so replacing a photo is distinct from a reaction."""
+    for kind in ("document", "photo", "video", "audio", "voice", "animation", "sticker", "video_note"):
+        media = getattr(message, kind, None)
+        if media:
+            return f"{kind}:{getattr(media, 'file_unique_id', None) or getattr(media, 'file_id', '')}"
+    return ""

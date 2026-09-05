@@ -12,12 +12,12 @@ import logging
 from pathlib import Path
 from typing import Any
 from pyrogram import Client
-from pyrogram.errors import RPCError
+from pyrogram.errors import BadRequest, MessageNotModified, RPCError
 from pyrogram.types import Message
 from ..core.forward_index import ForwardIndex
 from ..core.models import ForwardRecord, ListenerRule
 from ..core.naming import build_rendered_body, maybe_prefix_text
-from ..core.rules import get_editable_content, is_outgoing_message, is_view_once_message
+from ..core.rules import get_editable_content, get_media_signature, is_outgoing_message, is_view_once_message
 
 
 def detect_media_type(message: Message) -> str:
@@ -239,40 +239,30 @@ async def copy_or_replace_message(
 ) -> None:
     """Copies or replaces a source message across all listener targets."""
     existing_record = forward_index.get_record(message.chat.id, message.id)
-    if existing_record is not None:
-        await delete_forwarded_targets(client, existing_record.target_message_ids)
-
-    # Outgoing (own messages) must never mark the target as unread — that is
-    # a copy of my own statement, not incoming content.
+    previous = dict(existing_record.target_message_ids) if existing_record else {}
+    active_targets = rule.active_target_chat_ids if rule.enabled else []
     effective_mark_unread = rule.mark_target_unread and not is_outgoing_message(message)
-    target_message_ids = await copy_message_to_targets(
-        client,
-        message,
-        rule.active_target_chat_ids,
-        name_prefix=rule.name_prefix,
+    replacements = await copy_message_to_targets(
+        client, message, active_targets, name_prefix=rule.name_prefix,
         mark_target_unread=effective_mark_unread,
     )
-    if target_message_ids:
-        content_type, body = get_editable_content(message)
-        if rule.store_edits and content_type and body:
-            forward_index.set_record(
-                message.chat.id,
-                message.id,
-                target_message_ids,
-                edit_history=[build_rendered_body(message, body, rule.name_prefix)],
-                edit_mode=content_type,
-                last_body=body,
-            )
-        else:
-            forward_index.set_record(
-                message.chat.id,
-                message.id,
-                target_message_ids,
-                edit_mode=content_type,
-                last_body=body,
-            )
-    else:
-        forward_index.remove_record(message.chat.id, message.id)
+    # A failed replacement must leave both the archive and its mapping intact.
+    await delete_forwarded_targets(client, {
+        target: previous[target] for target in replacements if target in previous
+    })
+    target_message_ids = {**previous, **replacements}
+    if not target_message_ids:
+        return
+    complete = all(target in replacements for target in active_targets)
+    content_type, body = get_editable_content(message)
+    history = [build_rendered_body(message, body, rule.name_prefix)] if rule.store_edits and body else []
+    forward_index.set_record(
+        message.chat.id, message.id, target_message_ids,
+        edit_history=history if complete or existing_record is None else existing_record.edit_history,
+        edit_mode=content_type if complete or existing_record is None else existing_record.edit_mode,
+        last_body=body if complete or existing_record is None else existing_record.last_body,
+        media_signature=get_media_signature(message) if complete or existing_record is None else existing_record.media_signature,
+    )
 
 
 async def resend_message_with_caption_override(
@@ -321,70 +311,65 @@ async def edit_forwarded_message(
 ) -> None:
     """Edits forwarded messages in place when possible."""
     content_type, body = get_editable_content(message)
-    if not content_type or not body:
+    if record.media_signature != get_media_signature(message) or record.edit_mode != content_type:
         await copy_or_replace_message(client, message, rule, forward_index)
         return
-    if record.edit_mode == content_type and record.last_body == body:
+    if record.last_body == body:
         return
 
     rendered_body = build_rendered_body(message, body, rule.name_prefix)
-    edit_history: list[str] | None = None
-    if rule.store_edits:
-        edit_history = list(record.edit_history) if record.edit_history else [rendered_body]
-        if record.edit_history:
-            edit_history.append(f"edited to: {body}")
-        rendered_text = "\n".join(edit_history)
+    history = list(record.edit_history) if rule.store_edits else []
+    if history:
+        history.append(f"edited to: {body}")
     else:
-        rendered_text = rendered_body
+        history = [rendered_body]
+    # Retain the newest versions that fit Telegram's UTF-16 limits.
+    limit = 4096 if content_type == "text" else 1024
+    while len(history) > 1 and len("\n".join(history).encode("utf-16-le")) // 2 > limit:
+        history.pop(0)
+    rendered_text = "\n".join(history)
+    if len(rendered_text.encode("utf-16-le")) // 2 > limit:
+        rendered_text = rendered_text.encode("utf-16-le")[:(limit - 1) * 2].decode("utf-16-le", errors="ignore") + "…"
+        history = [rendered_text]
 
     target_message_ids = dict(record.target_message_ids)
-
-    for target_chat_id, target_message_id in list(target_message_ids.items()):
+    complete = True
+    active_targets = set(rule.active_target_chat_ids) if rule.enabled else set()
+    for target_chat_id, target_message_id in record.target_message_ids.items():
+        if target_chat_id not in active_targets:
+            continue
         try:
             if content_type == "text":
                 await client.edit_message_text(target_chat_id, target_message_id, rendered_text)
             else:
                 await client.edit_message_caption(target_chat_id, target_message_id, rendered_text)
             continue
+        except MessageNotModified:
+            continue
+        except BadRequest:
+            logging.debug("Target message %s cannot be edited; trying replacement.", target_message_id, exc_info=True)
         except Exception:
-            logging.debug(
-                "Edit for message %s in chat %s failed, re-sending.",
-                target_message_id,
-                target_chat_id,
-                exc_info=True,
-            )
-
-        try:
-            await client.delete_messages(target_chat_id, target_message_id)
-        except Exception:
-            logging.debug(
-                "Old target message %s in chat %s could not be deleted.",
-                target_message_id,
-                target_chat_id,
-                exc_info=True,
-            )
+            # A timeout is not evidence that the old message needs replacing.
+            logging.warning("Edit for message %s to %s failed; keeping archive.", message.id, target_chat_id, exc_info=True)
+            complete = False
+            continue
 
         if content_type == "text":
-            replacement_message = await send_text_message(client, target_chat_id, rendered_text)
-            replacement_message_id = int(replacement_message.id) if replacement_message is not None else None
+            replacement = await send_text_message(client, target_chat_id, rendered_text)
         else:
-            replacement_message = await resend_message_with_caption_override(client, message, target_chat_id, rendered_text)
-            replacement_message_id = int(replacement_message.id) if replacement_message is not None else None
-        if replacement_message_id is not None:
-            target_message_ids[target_chat_id] = replacement_message_id
-            if rule.mark_target_unread and not is_outgoing_message(message):
-                await mark_chat_unread_safely(client, target_chat_id)
-        else:
-            target_message_ids.pop(target_chat_id, None)
+            replacement = await resend_message_with_caption_override(client, message, target_chat_id, rendered_text)
+        if replacement is None:
+            complete = False
+            continue
+        target_message_ids[target_chat_id] = int(replacement.id)
+        await delete_forwarded_targets(client, {target_chat_id: target_message_id})
+        if rule.mark_target_unread and not is_outgoing_message(message):
+            await mark_chat_unread_safely(client, target_chat_id)
 
-    if target_message_ids:
-        forward_index.set_record(
-            message.chat.id,
-            message.id,
-            target_message_ids,
-            edit_history=edit_history,
-            edit_mode=content_type,
-            last_body=body,
-        )
-    else:
-        forward_index.remove_record(message.chat.id, message.id)
+    forward_index.set_record(
+        message.chat.id, message.id, target_message_ids,
+        edit_history=(history if rule.store_edits else []) if complete else record.edit_history,
+        edit_mode=content_type if complete else record.edit_mode,
+        last_body=body if complete else record.last_body,
+        media_signature=record.media_signature,
+    )

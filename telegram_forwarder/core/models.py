@@ -70,4 +70,5 @@ class ForwardRecord:
     edit_history: list[str] = field(default_factory=list)
     edit_mode: str = ""
     last_body: str = ""
+    media_signature: str = ""
     stored_at: float = field(default_factory=time.monotonic)

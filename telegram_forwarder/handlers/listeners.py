@@ -11,6 +11,7 @@ from ..core.config_store import BotConfigStore
 from ..core.forward_index import ForwardIndex
 from ..core.rules import (
     get_editable_content,
+    get_media_signature,
     get_message_text,
     is_outgoing_message,
     passes_view_once_filter,
@@ -103,16 +104,24 @@ def register_forward_handlers(app: Client, store: BotConfigStore, forward_index:
             ):
                 record = forward_index.remove_record(message.chat.id, message.id)
                 if record is not None:
-                    await delete_forwarded_targets(client, record.target_message_ids)
+                    await delete_forwarded_targets(client, {
+                        target: mid for target, mid in record.target_message_ids.items()
+                        if target in rule.active_target_chat_ids
+                    })
                 return
             record = forward_index.get_record(message.chat.id, message.id)
+            if record is None:
+                # Never turn an edit/reaction on an unknown (e.g. pre-upgrade)
+                # message into a duplicate new archive entry.
+                return
             content_type, body = get_editable_content(message)
             # Reactions/view-counts also fire on_edited_message. If the
             # editable content is unchanged it is not a real edit -> do not
             # re-copy the targets. Also covers media without caption ("" == "").
-            if record is not None and record.edit_mode == content_type and record.last_body == body:
+            if (record.edit_mode == content_type and record.last_body == body
+                    and record.media_signature == get_media_signature(message)):
                 return
-            if record is not None and content_type:
+            if content_type and record.media_signature == get_media_signature(message) and record.edit_mode == content_type:
                 await edit_forwarded_message(client, message, rule, record, forward_index)
                 return
             await copy_or_replace_message(client, message, rule, forward_index)

@@ -36,6 +36,7 @@ from .settings import (
     HEALTH_CHECK_INTERVAL_SECONDS,
     LOGS_DIR,
     NETWORK_RETRY_DELAY_SECONDS,
+    SESSION_DIR,
 )
 from .ui.formatting import get_status_text
 
@@ -104,7 +105,7 @@ async def main() -> None:
             "Chat commands disabled (ENABLE_CHAT_COMMANDS=false). "
             "Configuration only via bot_config.json."
         )
-    forward_index = ForwardIndex()
+    forward_index = ForwardIndex(SESSION_DIR / "forward_index.sqlite3")
     register_forward_handlers(app, store, forward_index)
 
     control_bot = create_control_bot(store, scheduler, app)
@@ -167,6 +168,7 @@ async def main() -> None:
                     logging.exception("Client could not be stopped during cleanup.")
 
     logging.info("Stopping userbot...")
+    forward_index.close()
     if scheduler.running:
         scheduler.shutdown()
         logging.info("Scheduler stopped.")

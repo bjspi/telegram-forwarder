@@ -41,7 +41,7 @@
 - **Chat-to-chat forwarding** — copies messages (text and every media type) from source chats into any number of target chats.
 - **Works with copy-protected chats** — channels and groups with *"Restrict saving content"* enabled (typical for premium/paid channels) block normal forwarding and copying; the re-upload fallback mirrors them anyway, for every media type.
 - **Two-stage copy fallback** — tries Telegram's native `copy` first; when that is blocked, it transparently downloads and re-uploads the media as a fresh message.
-- **Edit propagation** — edits to a source message are mirrored into all targets; optionally the *full edit history* is rendered into the message (`store_edits`).
+- **Edit propagation** — text and media edits are mirrored into active targets; optionally recent edit history is rendered into the message (`store_edits`), keeping the newest versions that fit Telegram's limits.
 - **Direction filters & exclusions** — forward only incoming, only outgoing, or both (`copy_incoming` / `copy_outgoing`); skip messages matching `fnmatch` patterns.
 - **View-once mode** — a per-chat setting (`view_once`) for self-destructing media (view-once photos & videos, listen-once voice/video notes): `off` skips them, `on` forwards them alongside everything else, `only` forwards *nothing but* them. In `on`/`only` they are archived as regular, persistent media in the target chat before they can burn.
 - **Sender attribution** — optionally prefix copied text with the original sender's name (`--name-prefix`).
@@ -65,10 +65,10 @@ flowchart LR
     R -->|forward| P["Copy pipeline"]
     P -->|"1️⃣ message.copy()"| T1["🎯 Target chat A"]
     P -->|"2️⃣ fallback:<br/>download + re-upload"| T2["🎯 Target chat B"]
-    P <-->|"edit propagation"| FI[("Forward index<br/>(source → targets, TTL)")]
+    P <-->|"edit propagation"| FI[("Forward index<br/>(source → targets, SQLite)")]
 ```
 
-Every copied message is tracked in an in-memory forward index, so later **edits** of the source can be applied to the exact target messages — in place when possible, delete-and-resend when not.
+Copied messages are tracked in `session/forward_index.sqlite3`, so later **edits** still reach the exact target messages after a restart. Edits apply in place when possible; any replacement is sent successfully before the old copy is deleted. Paused or removed targets receive no edits. Updates for unknown messages (including messages copied before this database existed) are ignored instead of creating duplicate copies.
 
 Because the fallback re-uploads content as fresh messages, even chats with Telegram's content protection ("Restrict saving content", common in premium channels) can be mirrored — where native forwarding and copying are refused by the API.
 
@@ -156,7 +156,7 @@ Everything an operator tunes lives in `.env` — every variable is documented in
 | `CONTROL_BOT_TOKEN` / `CONTROL_BOT_OWNER_ID` | — | Optional BotFather control bot and its sole owner (see [Control Bot](#control-bot)). |
 | `TIMEZONE` | `Europe/Berlin` | Keep-alive scheduling and log timestamps. |
 | `DELETE_DELAY_SECONDS` | `5` | Auto-delete delay for command replies. |
-| `FORWARD_RECORD_TTL_SECONDS` | `86400` | How long source→target mappings are kept for edit propagation. |
+| `FORWARD_RECORD_TTL_SECONDS` | `86400` | Lifetime of cached mappings in RAM; persistent mappings remain available for later edits. |
 | `HEALTH_CHECK_INTERVAL_SECONDS` / `MAX_UNHEALTHY_DURATION_SECONDS` | `60` / `900` | Health-check cadence and the hard-exit threshold. |
 | `LOG_RETENTION_DAYS` | `10` | Daily log files older than this are deleted automatically. |
 
