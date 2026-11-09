@@ -16,7 +16,7 @@ from pyrogram import Client, filters
 from pyrogram.types import Message
 from ..connection.chats import build_recent_chats_text, resolve_chat_ref, resolve_target_chats
 from ..core.config_store import BotConfigStore
-from ..core.models import ChatRef
+from ..core.models import TOPIC_SEPARATOR, ChatRef
 from ..core.naming import get_chat_name_from_chat
 from ..core.rules import VIEW_ONCE_MODES
 from ..services.keepalive import parse_hms, sync_keepalive_jobs
@@ -96,9 +96,11 @@ def register_command_handlers(app: Client, store: BotConfigStore, scheduler: Asy
         """Shows the current chat id."""
         try:
             title = message.chat.title or message.chat.first_name or "Unknown"
+            topic_id = message.message_thread_id if getattr(message, "is_topic_message", False) else None
+            topic_text = f"\nTopic id: `{topic_id}` (target: `{message.chat.id}:{topic_id}`)" if topic_id else ""
             await send_and_delete_message(
                 message,
-                f"Chat id: `{message.chat.id}`\nTitle: {title}",
+                f"Chat id: `{message.chat.id}`\nTitle: {title}{topic_text}",
                 store.delete_delay_seconds,
             )
         except Exception:
@@ -239,7 +241,8 @@ def register_command_handlers(app: Client, store: BotConfigStore, scheduler: Asy
                 )
                 return
 
-            target_chat = await resolve_chat_ref(client, args[1])
+            # A target is identified by its chat; a `:<topic_id>` suffix is accepted but not needed.
+            target_chat = await resolve_chat_ref(client, args[1].partition(TOPIC_SEPARATOR)[0])
             rule, removed_targets = store.remove_listener_targets(source_chat.chat_id, [target_chat.chat_id])
             if rule is None:
                 await send_and_delete_message(

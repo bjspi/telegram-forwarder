@@ -15,9 +15,21 @@ from pyrogram import Client
 from pyrogram.errors import BadRequest, MessageNotModified, RPCError
 from pyrogram.types import Message
 from ..core.forward_index import ForwardIndex
-from ..core.models import ForwardRecord, ListenerRule
+from ..core.models import ChatRef, ForwardRecord, ListenerRule
 from ..core.naming import build_rendered_body, maybe_prefix_text
 from ..core.rules import get_editable_content, get_media_signature, is_outgoing_message, is_view_once_message
+from ..ui.formatting import format_chat_ref
+
+
+def thread_id_of(target: ChatRef) -> int:
+    """Returns the ``message_thread_id`` argument that addresses a target.
+
+    Every send into a target has to pass this, including each fallback: a copy
+    that drops the thread id lands in the forum's General topic instead of the
+    configured one. Targets without a topic yield None, which pyrogram treats
+    as "no thread" although it annotates the parameter as ``int``.
+    """
+    return target.topic_id or None  # type: ignore[return-value]
 
 
 def detect_media_type(message: Message) -> str:
@@ -40,45 +52,47 @@ def safe_unlink(path: Any) -> None:
 
 async def send_media_from_path(
     client: Client,
-    target_chat_id: int,
+    target: ChatRef,
     media_type: str,
     path: str,
     caption: str,
 ) -> Message | None:
     """Sends a previously downloaded media file using the matching pyrogram method."""
+    target_chat_id = target.chat_id
+    thread_id = thread_id_of(target)
     if media_type == "document":
-        return await client.send_document(target_chat_id, path, caption=caption)
+        return await client.send_document(target_chat_id, path, caption=caption, message_thread_id=thread_id)
     if media_type == "photo":
         # pyrotgfork annotates `photo` as InputMediaPhoto only, but the
         # implementation accepts a file path like every other send_* method.
-        return await client.send_photo(target_chat_id, path, caption=caption)  # type: ignore[arg-type]
+        return await client.send_photo(target_chat_id, path, caption=caption, message_thread_id=thread_id)  # type: ignore[arg-type]
     if media_type == "video":
-        return await client.send_video(target_chat_id, path, caption=caption)
+        return await client.send_video(target_chat_id, path, caption=caption, message_thread_id=thread_id)
     if media_type == "audio":
-        return await client.send_audio(target_chat_id, path, caption=caption)
+        return await client.send_audio(target_chat_id, path, caption=caption, message_thread_id=thread_id)
     if media_type == "voice":
-        return await client.send_voice(target_chat_id, path, caption=caption)
+        return await client.send_voice(target_chat_id, path, caption=caption, message_thread_id=thread_id)
     if media_type == "animation":
-        return await client.send_animation(target_chat_id, path, caption=caption)
+        return await client.send_animation(target_chat_id, path, caption=caption, message_thread_id=thread_id)
     if media_type == "sticker":
-        return await client.send_sticker(target_chat_id, path)
+        return await client.send_sticker(target_chat_id, path, message_thread_id=thread_id)
     if media_type == "video_note":
-        return await client.send_video_note(target_chat_id, path)
+        return await client.send_video_note(target_chat_id, path, message_thread_id=thread_id)
     return None
 
 
 async def send_text_message(
     client: Client,
-    target_chat_id: int,
+    target: ChatRef,
     text: str,
 ) -> Message | None:
-    """Sends plain text to a target chat."""
+    """Sends plain text to a target chat (and its topic, if one is set)."""
     try:
-        return await client.send_message(target_chat_id, text)
+        return await client.send_message(target.chat_id, text, message_thread_id=thread_id_of(target))
     except Exception:
         logging.debug(
             "Sending the text message to %s failed.",
-            target_chat_id,
+            format_chat_ref(target),
             exc_info=True,
         )
     return None
@@ -106,45 +120,47 @@ async def mark_chat_unread_safely(client: Client, chat_id: int) -> None:
 async def resend_message_with_fallback(
     client: Client,
     message: Message,
-    target_chat_id: int,
+    target: ChatRef,
     name_prefix: bool = False,
 ) -> Message | None:
     """Re-uploads or recreates a message when Telegram copy is blocked."""
     caption = maybe_prefix_text(message, message.caption or "", name_prefix)
     media_type = detect_media_type(message)
+    target_label = format_chat_ref(target)
     copied_message: Message | None = None
     path: Any = None
 
     try:
         if not media_type and message.text:
             copied_message = await client.send_message(
-                target_chat_id,
+                target.chat_id,
                 maybe_prefix_text(message, message.text, name_prefix),
+                message_thread_id=thread_id_of(target),
             )
         else:
             path = await message.download()
             copied_message = await send_media_from_path(
-                client, target_chat_id, media_type or "document", str(path), caption,
+                client, target, media_type or "document", str(path), caption,
             )
         if copied_message is not None:
             logging.info(
                 "Fallback for message %s from source %s to %s succeeded.",
                 message.id,
                 message.chat.id,
-                target_chat_id,
+                target_label,
             )
     except (OSError, TimeoutError, RPCError):
         logging.warning(
             "Fallback for message %s to %s failed due to a network/API problem.",
             message.id,
-            target_chat_id,
+            target_label,
             exc_info=True,
         )
     except Exception:
         logging.exception(
             "Re-upload failed for message %s to %s.",
             message.id,
-            target_chat_id,
+            target_label,
         )
     finally:
         safe_unlink(path)
@@ -154,12 +170,13 @@ async def resend_message_with_fallback(
 async def copy_message_to_target(
     client: Client,
     message: Message,
-    target_chat_id: int,
+    target: ChatRef,
     name_prefix: bool = False,
 ) -> int | None:
-    """Copies a message to the target chat with a media re-upload fallback."""
+    """Copies a message to the target chat (or its topic) with a media re-upload fallback."""
+    target_label = format_chat_ref(target)
     if name_prefix:
-        copied_message = await resend_message_with_fallback(client, message, target_chat_id, name_prefix=True)
+        copied_message = await resend_message_with_fallback(client, message, target, name_prefix=True)
         return int(copied_message.id) if copied_message is not None else None
 
     try:
@@ -170,12 +187,12 @@ async def copy_message_to_target(
         if is_view_once_message(message):
             raise RuntimeError("view_once_media")
 
-        copied = await message.copy(chat_id=target_chat_id)
+        copied = await message.copy(chat_id=target.chat_id, message_thread_id=thread_id_of(target))
         logging.info(
             "Message %s from source %s successfully copied to %s.",
             message.id,
             message.chat.id,
-            target_chat_id,
+            target_label,
         )
         # copy() returns a list for media groups; the first message counts here.
         copied_first = copied[0] if isinstance(copied, list) else copied
@@ -184,36 +201,36 @@ async def copy_message_to_target(
         logging.warning(
             "Copy for message %s to %s failed due to a network/API problem: %s",
             message.id,
-            target_chat_id,
+            target_label,
             exc,
         )
     except Exception as exc:
         logging.warning(
             "Copy failed for message %s to %s: %s",
             message.id,
-            target_chat_id,
+            target_label,
             exc,
         )
 
-    copied_message = await resend_message_with_fallback(client, message, target_chat_id, name_prefix=False)
+    copied_message = await resend_message_with_fallback(client, message, target, name_prefix=False)
     return int(copied_message.id) if copied_message is not None else None
 
 
 async def copy_message_to_targets(
     client: Client,
     message: Message,
-    target_chat_ids: list[int],
+    targets: list[ChatRef],
     name_prefix: bool = False,
     mark_target_unread: bool = False,
 ) -> dict[int, int]:
-    """Copies one message sequentially to all configured target chats."""
+    """Copies one message sequentially to all given targets, keyed by target chat id."""
     target_message_ids: dict[int, int] = {}
-    for target_chat_id in target_chat_ids:
-        copied_message_id = await copy_message_to_target(client, message, target_chat_id, name_prefix=name_prefix)
+    for target in targets:
+        copied_message_id = await copy_message_to_target(client, message, target, name_prefix=name_prefix)
         if copied_message_id is not None:
-            target_message_ids[target_chat_id] = copied_message_id
+            target_message_ids[target.chat_id] = copied_message_id
             if mark_target_unread:
-                await mark_chat_unread_safely(client, target_chat_id)
+                await mark_chat_unread_safely(client, target.chat_id)
     return target_message_ids
 
 
@@ -240,7 +257,7 @@ async def copy_or_replace_message(
     """Copies or replaces a source message across all listener targets."""
     existing_record = forward_index.get_record(message.chat.id, message.id)
     previous = dict(existing_record.target_message_ids) if existing_record else {}
-    active_targets = rule.active_target_chat_ids if rule.enabled else []
+    active_targets = rule.active_targets if rule.enabled else []
     effective_mark_unread = rule.mark_target_unread and not is_outgoing_message(message)
     replacements = await copy_message_to_targets(
         client, message, active_targets, name_prefix=rule.name_prefix,
@@ -253,7 +270,7 @@ async def copy_or_replace_message(
     target_message_ids = {**previous, **replacements}
     if not target_message_ids:
         return
-    complete = all(target in replacements for target in active_targets)
+    complete = all(target.chat_id in replacements for target in active_targets)
     content_type, body = get_editable_content(message)
     history = [build_rendered_body(message, body, rule.name_prefix)] if rule.store_edits and body else []
     forward_index.set_record(
@@ -268,7 +285,7 @@ async def copy_or_replace_message(
 async def resend_message_with_caption_override(
     client: Client,
     message: Message,
-    target_chat_id: int,
+    target: ChatRef,
     caption: str,
 ) -> Message | None:
     """Re-sends a source message with a custom caption."""
@@ -276,12 +293,12 @@ async def resend_message_with_caption_override(
     if not media_type:
         if message.text:
             try:
-                return await client.send_message(target_chat_id, caption)
+                return await client.send_message(target.chat_id, caption, message_thread_id=thread_id_of(target))
             except Exception:
                 logging.debug(
                     "Re-send with caption override for message %s to %s failed.",
                     message.id,
-                    target_chat_id,
+                    format_chat_ref(target),
                     exc_info=True,
                 )
         return None
@@ -289,12 +306,12 @@ async def resend_message_with_caption_override(
     path: Any = None
     try:
         path = await message.download()
-        return await send_media_from_path(client, target_chat_id, media_type, str(path), caption)
+        return await send_media_from_path(client, target, media_type, str(path), caption)
     except Exception:
         logging.debug(
             "Re-send with caption override for message %s to %s failed.",
             message.id,
-            target_chat_id,
+            format_chat_ref(target),
             exc_info=True,
         )
         return None
@@ -334,9 +351,10 @@ async def edit_forwarded_message(
 
     target_message_ids = dict(record.target_message_ids)
     complete = True
-    active_targets = set(rule.active_target_chat_ids) if rule.enabled else set()
+    active_targets = {target.chat_id: target for target in rule.active_targets} if rule.enabled else {}
     for target_chat_id, target_message_id in record.target_message_ids.items():
-        if target_chat_id not in active_targets:
+        target = active_targets.get(target_chat_id)
+        if target is None:
             continue
         try:
             if content_type == "text":
@@ -355,9 +373,9 @@ async def edit_forwarded_message(
             continue
 
         if content_type == "text":
-            replacement = await send_text_message(client, target_chat_id, rendered_text)
+            replacement = await send_text_message(client, target, rendered_text)
         else:
-            replacement = await resend_message_with_caption_override(client, message, target_chat_id, rendered_text)
+            replacement = await resend_message_with_caption_override(client, message, target, rendered_text)
         if replacement is None:
             complete = False
             continue

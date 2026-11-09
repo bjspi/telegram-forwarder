@@ -24,7 +24,12 @@ ADD_LISTENER_TARGET_TEXT = (
 )
 ADD_TARGET_TEXT = (
     "➕ **Add target**\n\n"
-    "Pick the additional **target** chat, or type its id / @username."
+    "Pick the additional **target** chat, or type its id / @username.\n"
+    "Picking a group that already is a target lets you move it to another topic."
+)
+ADD_TARGET_TOPIC_HINT = (
+    "This group has topics. Pick the topic to copy into, or the whole group "
+    "(messages then land in General)."
 )
 ADD_KEEPALIVE_CHAT_TEXT = (
     "➕ **New keep-alive** — step 1 of 2\n\n"
@@ -34,7 +39,15 @@ ADD_KEEPALIVE_TIME_TEXT = (
     "➕ **New keep-alive** — step 2 of 2\n\n"
     "Send the time of day as **HH:MM:SS** (e.g. `08:00:00`)."
 )
-TYPE_CHAT_TEXT = "✍️ Send me the chat **id** (e.g. `-1001234567890`) or a **@username**."
+TYPE_CHAT_TEXT = (
+    "✍️ Send me the chat **id** (e.g. `-1001234567890`) or a **@username**.\n"
+    "A target may name a forum topic directly: `-1001234567890:42`."
+)
+
+
+def render_pick_topic_text(target: ChatRef) -> str:
+    """Builds the topic-picker prompt for a forum target."""
+    return f"🧵 **Topic** in `{format_chat_ref(target)}`\n\n{ADD_TARGET_TOPIC_HINT}"
 
 
 def _state_chip(active: bool) -> str:

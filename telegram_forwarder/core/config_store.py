@@ -16,7 +16,7 @@ from ..settings import (
     DELETE_DELAY_SECONDS,
     TIMEZONE,
 )
-from .models import ChatRef, KeepAliveRule, ListenerRule
+from .models import GENERAL_TOPIC_ID, NO_TOPIC_ID, ChatRef, KeepAliveRule, ListenerRule
 from .rules import normalize_view_once
 
 
@@ -115,6 +115,15 @@ class BotConfigStore:
             if "disabled_target_ids" not in item:
                 item["disabled_target_ids"] = []
                 migration_needed = True
+            for raw_target_chat in item.get("target_chats", []):
+                if not isinstance(raw_target_chat, dict):
+                    continue
+                if "topic_id" not in raw_target_chat:
+                    raw_target_chat["topic_id"] = NO_TOPIC_ID
+                    migration_needed = True
+                if "topic_name" not in raw_target_chat:
+                    raw_target_chat["topic_name"] = ""
+                    migration_needed = True
             if "exclusions" in item:
                 original_exclusions = list(item.get("exclusions", []))
                 filtered_exclusions = [
@@ -227,20 +236,27 @@ class BotConfigStore:
         name_prefix: bool | None = None,
         view_once: str | None = None,
     ) -> tuple[ListenerRule, list[ChatRef]]:
-        """Creates or extends a listener for one source chat without duplicating targets."""
+        """Creates or extends a listener for one source chat without duplicating targets.
+
+        A listener has one target per chat. Naming an existing target chat with
+        a different forum topic therefore re-points that target instead of
+        adding a second one. Returns the rule plus the targets that were added
+        or re-pointed.
+        """
         existing = self._listeners.get(source_chat.chat_id)
         exclusions = list(existing.exclusions) if existing else []
-        existing_target_chats = existing.target_chats if existing else []
-        merged_target_chats = list(existing_target_chats)
-        merged_target_chat_ids = {target.chat_id for target in merged_target_chats}
+        merged_targets: dict[int, ChatRef] = {
+            target.chat_id: target for target in (existing.target_chats if existing else [])
+        }
         added_target_chats: list[ChatRef] = []
 
         for target_chat in target_chats:
-            if target_chat.chat_id in merged_target_chat_ids:
+            known_target = merged_targets.get(target_chat.chat_id)
+            if known_target is not None and known_target.topic_id == target_chat.topic_id:
                 continue
-            merged_target_chats.append(target_chat)
-            merged_target_chat_ids.add(target_chat.chat_id)
+            merged_targets[target_chat.chat_id] = target_chat
             added_target_chats.append(target_chat)
+        merged_target_chats = list(merged_targets.values())
 
         rule = ListenerRule(
             source_chat_id=source_chat.chat_id,
@@ -394,8 +410,12 @@ class BotConfigStore:
         source_chat_id: int,
         source_chat_name: str | None = None,
         target_chat_names: dict[int, str] | None = None,
+        target_topic_names: dict[int, str] | None = None,
     ) -> bool:
-        """Updates stored chat names for one listener and persists on change."""
+        """Updates stored chat and topic names for one listener and persists on change.
+
+        Both target mappings are keyed by target chat id.
+        """
         rule = self._listeners.get(source_chat_id)
         if rule is None:
             return False
@@ -410,6 +430,13 @@ class BotConfigStore:
                 resolved_name = target_chat_names.get(target_chat.chat_id, "")
                 if resolved_name and resolved_name != target_chat.chat_name:
                     target_chat.chat_name = resolved_name
+                    changed = True
+
+        if target_topic_names:
+            for target_chat in rule.target_chats:
+                resolved_topic_name = target_topic_names.get(target_chat.chat_id, "")
+                if resolved_topic_name and resolved_topic_name != target_chat.topic_name:
+                    target_chat.topic_name = resolved_topic_name
                     changed = True
 
         if changed:
@@ -441,8 +468,17 @@ class BotConfigStore:
             return ChatRef(
                 chat_id=int(item["chat_id"]),
                 chat_name=str(item.get("chat_name", "")),
+                topic_id=self._normalize_topic_id(item.get("topic_id", NO_TOPIC_ID)),
+                topic_name=str(item.get("topic_name", "")),
             )
         return ChatRef(chat_id=int(item), chat_name="")
+
+    def _normalize_topic_id(self, value: Any) -> int:
+        """Normalizes a raw topic id; the General topic collapses to "no topic"."""
+        topic_id = int(value or NO_TOPIC_ID)
+        if topic_id < 0:
+            raise ValueError("topic_id must not be negative.")
+        return NO_TOPIC_ID if topic_id == GENERAL_TOPIC_ID else topic_id
 
     def _normalize_keepalive_message_text(self, value: Any) -> str | list[str]:
         """Normalizes keep-alive message text into a string or a list of strings."""

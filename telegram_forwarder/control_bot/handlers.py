@@ -20,12 +20,13 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from pyrogram import Client, filters
 from pyrogram.errors import MessageNotModified
 from pyrogram.types import CallbackQuery, InlineKeyboardMarkup, Message
-from ..connection.chats import get_recent_chats, resolve_chat_ref
+from ..connection.chats import get_forum_topic_targets, get_recent_chats, resolve_chat_ref, resolve_target_ref
 from ..core.config_store import BotConfigStore
 from ..core.models import ChatRef
 from ..services.keepalive import parse_hms, sync_keepalive_jobs
 from ..settings import CONTROL_BOT_OWNER_ID
 from .keyboards import (
+    TOPIC_PICK_WHOLE_CHAT,
     cancel_keyboard,
     confirm_keyboard,
     keepalives_keyboard,
@@ -35,6 +36,7 @@ from .keyboards import (
     main_menu_keyboard,
     overview_keyboard,
     recent_chats_keyboard,
+    topics_keyboard,
 )
 from .state import (
     KIND_KEEPALIVE,
@@ -43,6 +45,7 @@ from .state import (
     STEP_SOURCE,
     STEP_TARGET,
     STEP_TIME,
+    STEP_TOPIC,
     PendingAction,
 )
 from .views import (
@@ -61,6 +64,7 @@ from .views import (
     render_listener_targets_text,
     render_listeners_text,
     render_overview_text,
+    render_pick_topic_text,
     render_remove_target_text,
 )
 
@@ -101,7 +105,24 @@ def register_control_handlers(
         """Renders the listeners list screen."""
         return render_listeners_text(store), listeners_keyboard(store)
 
-    def apply_chat_choice(user_id: int, action: PendingAction, chosen: ChatRef) -> Screen | None:
+    def save_target(user_id: int, source: ChatRef, target: ChatRef) -> Screen | None:
+        """Stores a chosen target (chat or topic), ends the flow and shows the listener."""
+        store.upsert_listener(source_chat=source, target_chats=[target])
+        pending.pop(user_id, None)
+        return listener_detail(source.chat_id)
+
+    def apply_topic_choice(user_id: int, action: PendingAction, choice: str) -> Screen | None:
+        """Finishes the add-target flow with a picked topic or the whole chat."""
+        if action.step != STEP_TOPIC or action.source is None or action.target is None:
+            return None
+        if choice == TOPIC_PICK_WHOLE_CHAT:
+            return save_target(user_id, action.source, action.target)
+        index = int(choice)
+        if index >= len(action.topics):
+            return None
+        return save_target(user_id, action.source, action.topics[index])
+
+    async def apply_chat_choice(user_id: int, action: PendingAction, chosen: ChatRef) -> Screen | None:
         """Advances a pending flow with a chosen/verified chat and returns the next screen."""
         if action.kind == KIND_LISTENER and action.step == STEP_SOURCE:
             action.source = chosen
@@ -110,9 +131,16 @@ def register_control_handlers(
             return ADD_LISTENER_TARGET_TEXT, recent_chats_keyboard(action.recent)
 
         if action.kind == KIND_LISTENER and action.step == STEP_TARGET and action.source is not None:
-            store.upsert_listener(source_chat=action.source, target_chats=[chosen])
-            pending.pop(user_id, None)
-            return listener_detail(action.source.chat_id)
+            # A typed `<chat>:<topic_id>` already names its topic; otherwise a
+            # forum target gets the topic picker first.
+            topics = [] if chosen.topic_id else await get_forum_topic_targets(userbot, chosen)
+            if not topics:
+                return save_target(user_id, action.source, chosen)
+            action.target = chosen
+            action.topics = topics
+            action.step = STEP_TOPIC
+            action.awaiting_text = False
+            return render_pick_topic_text(chosen), topics_keyboard(topics)
 
         if action.kind == KIND_KEEPALIVE and action.step == STEP_CHAT:
             action.source = chosen
@@ -167,7 +195,13 @@ def register_control_handlers(
             index = int(parts[1])
             if action is None or index >= len(action.recent):
                 return None
-            return apply_chat_choice(user_id, action, action.recent[index])
+            return await apply_chat_choice(user_id, action, action.recent[index])
+
+        if head == "tpick":
+            action = pending.get(user_id)
+            if action is None:
+                return None
+            return apply_topic_choice(user_id, action, parts[1])
 
         if head == "l":
             return listener_detail(int(parts[1]))
@@ -201,7 +235,7 @@ def register_control_handlers(
         if head == "ltr":
             source_chat_id, target_chat_id = int(parts[1]), int(parts[2])
             rule = store.get_listener(source_chat_id)
-            target = next((chat for chat in rule.target_chats if chat.chat_id == target_chat_id), None) if rule else None
+            target = rule.find_target(target_chat_id) if rule else None
             if rule is None or target is None:
                 return listener_targets(source_chat_id) or listeners_screen()
             return (
@@ -337,7 +371,9 @@ def register_control_handlers(
                 return
 
             try:
-                chat_ref = await resolve_chat_ref(userbot, text)
+                # Only a listener target may carry a `:<topic_id>` suffix.
+                names_target = action.kind == KIND_LISTENER and action.step == STEP_TARGET
+                chat_ref = await (resolve_target_ref if names_target else resolve_chat_ref)(userbot, text)
             except ValueError as exc:
                 await message.reply_text(f"⚠️ {exc}")
                 return
@@ -349,7 +385,7 @@ def register_control_handlers(
                 return
 
             action.awaiting_text = False
-            screen = apply_chat_choice(message.from_user.id, action, chat_ref)
+            screen = await apply_chat_choice(message.from_user.id, action, chat_ref)
             if screen is None:
                 await message.reply_text("That target no longer exists. /menu to start over.")
                 return

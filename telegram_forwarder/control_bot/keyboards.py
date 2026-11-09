@@ -22,6 +22,9 @@ Callback-data scheme (``|``-separated, well under Telegram's 64-byte limit):
 - ``kt|<cid>``                  — edit a keep-alive's time (text input)
 - ``kdel|<cid>``                — ask to delete a keep-alive (confirm screen)
 - ``kdel2|<cid>``               — delete a keep-alive (confirmed)
+- ``pick|<index>``              — pick a chat from the recent-chats list
+- ``tpick|<index>``             — pick a forum topic of the chosen target chat
+- ``tpick|all``                 — target the chat itself (General topic)
 - ``nop``                       — inert label button
 """
 
@@ -29,6 +32,10 @@ from __future__ import annotations
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from ..core.config_store import BotConfigStore
 from ..core.models import ChatRef, KeepAliveRule, ListenerRule
+from ..ui.formatting import format_chat_label
+
+# ``tpick`` argument that selects the chat itself instead of one topic.
+TOPIC_PICK_WHOLE_CHAT: str = "all"
 
 
 def _mark(active: bool, label: str) -> str:
@@ -117,6 +124,15 @@ def recent_chats_keyboard(recent: list[ChatRef]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
+def topics_keyboard(topics: list[ChatRef]) -> InlineKeyboardMarkup:
+    """Builds the topic picker for a forum target; buttons carry the topic's index."""
+    rows: list[list[InlineKeyboardButton]] = [[_btn("💬 Whole group (General)", f"tpick|{TOPIC_PICK_WHOLE_CHAT}")]]
+    for index, topic in enumerate(topics):
+        rows.append([_btn(f"# {topic.topic_name or topic.topic_id}", f"tpick|{index}")])
+    rows.append([_btn("✖️ Cancel", "cancel")])
+    return InlineKeyboardMarkup(rows)
+
+
 def cancel_keyboard() -> InlineKeyboardMarkup:
     """Builds a single-button cancel keyboard for text-input steps."""
     return InlineKeyboardMarkup([[_btn("✖️ Cancel", "cancel")]])
@@ -174,10 +190,9 @@ def listener_targets_keyboard(rule: ListenerRule) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     for target in rule.target_chats:
         active = rule.is_target_active(target.chat_id)
-        label = target.chat_name or str(target.chat_id)
         rows.append(
             [
-                _btn(f"{_state_icon(active)} {label}", f"lti|{cid}|{target.chat_id}"),
+                _btn(f"{_state_icon(active)} {format_chat_label(target)}", f"lti|{cid}|{target.chat_id}"),
                 _btn("🗑", f"ltr|{cid}|{target.chat_id}"),
             ]
         )

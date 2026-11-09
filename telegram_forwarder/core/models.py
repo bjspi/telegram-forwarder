@@ -4,18 +4,37 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 
+# A target without a forum topic. Telegram's own id for the General topic is
+# 1; posting there needs no thread id, so both are stored as "no topic".
+NO_TOPIC_ID: int = 0
+GENERAL_TOPIC_ID: int = 1
+# Separates chat and topic in the textual target form `<chat>:<topic_id>`.
+TOPIC_SEPARATOR: str = ":"
+
 
 @dataclass(slots=True)
 class ChatRef:
-    """Stores a chat id together with a readable display name."""
+    """Stores a chat id together with a readable display name.
+
+    A forward target may additionally point at one forum topic of a
+    supergroup: ``topic_id`` is Telegram's message-thread id, ``NO_TOPIC_ID``
+    means the chat itself (which is the General topic in a forum).
+    """
 
     chat_id: int
     chat_name: str = ""
+    topic_id: int = NO_TOPIC_ID
+    topic_name: str = ""
 
 
 @dataclass(slots=True)
 class ListenerRule:
-    """Defines how one source chat is copied into one or more target chats."""
+    """Defines how one source chat is copied into one or more target chats.
+
+    A listener holds at most one target per chat: forward records and the
+    pause list are keyed by target chat id, so a target's forum topic is an
+    attribute of that target, not a second target in the same group.
+    """
 
     source_chat_id: int
     source_chat_name: str = ""
@@ -42,6 +61,19 @@ class ListenerRule:
         """Returns target chat ids that are not individually paused."""
         paused = set(self.disabled_target_ids)
         return [target.chat_id for target in self.target_chats if target.chat_id not in paused]
+
+    @property
+    def active_targets(self) -> list[ChatRef]:
+        """Returns the targets (chat plus optional topic) that are not paused."""
+        paused = set(self.disabled_target_ids)
+        return [target for target in self.target_chats if target.chat_id not in paused]
+
+    def find_target(self, target_chat_id: int) -> ChatRef | None:
+        """Returns the configured target for one chat id, if any."""
+        for target in self.target_chats:
+            if target.chat_id == target_chat_id:
+                return target
+        return None
 
     def is_target_active(self, target_chat_id: int) -> bool:
         """Returns whether one target participates in forwarding."""

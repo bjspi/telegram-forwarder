@@ -2,14 +2,32 @@
 
 from __future__ import annotations
 from ..core.config_store import BotConfigStore
-from ..core.models import ChatRef, KeepAliveRule, ListenerRule
+from ..core.models import TOPIC_SEPARATOR, ChatRef, KeepAliveRule, ListenerRule
 
 
 def format_chat_ref(chat_ref: ChatRef) -> str:
-    """Formats one chat reference for display in logs and command replies."""
+    """Formats one chat reference for display in logs and command replies.
+
+    A topic target reads ``Group › Topic (<chat_id>:<topic_id>)``; the id part
+    is exactly what ``/copy`` accepts as a target.
+    """
+    if not chat_ref.topic_id:
+        if chat_ref.chat_name:
+            return f"{chat_ref.chat_name} ({chat_ref.chat_id})"
+        return str(chat_ref.chat_id)
+    target_id = f"{chat_ref.chat_id}{TOPIC_SEPARATOR}{chat_ref.topic_id}"
     if chat_ref.chat_name:
-        return f"{chat_ref.chat_name} ({chat_ref.chat_id})"
-    return str(chat_ref.chat_id)
+        return f"{format_chat_label(chat_ref)} ({target_id})"
+    return target_id
+
+
+def format_chat_label(chat_ref: ChatRef) -> str:
+    """Formats the name-only label of a chat reference (buttons, short lists)."""
+    chat_label = chat_ref.chat_name or str(chat_ref.chat_id)
+    if not chat_ref.topic_id:
+        return chat_label
+    topic_label = chat_ref.topic_name or f"topic {chat_ref.topic_id}"
+    return f"{chat_label} › {topic_label}"
 
 
 def format_chat_refs(chat_refs: list[ChatRef]) -> str:
@@ -125,7 +143,7 @@ def build_help_text(store: BotConfigStore) -> str:
         "`/helpf`\n"
         "Shows this help.\n\n"
         "`/show_id`\n"
-        "Shows the current chat id.\n\n"
+        "Shows the current chat id and, inside a forum topic, the topic id.\n\n"
         "`/list_chats`\n"
         "Shows the 20 most recent chats with type, name and chat id. Output is deleted after 20 seconds.\n\n"
         "`/config`\n"
@@ -138,6 +156,9 @@ def build_help_text(store: BotConfigStore) -> str:
         "Uses the current chat as source and adds one or more targets.\n\n"
         "`/copy <source> <target> [more...] [--name-prefix] [--view-once=off|on|only]`\n"
         "Creates a rule from any chat.\n\n"
+        "`/copy <target>:<topic_id>`\n"
+        "Any target can name a forum topic of a supergroup, e.g. `-1001234567890:42` or `@group:42`. "
+        "Repeating a target chat with another topic moves that target to the new topic.\n\n"
         "`/stop`\n"
         "Removes all targets for the current chat.\n\n"
         "`/stop <source>`\n"
@@ -161,6 +182,7 @@ def build_help_text(store: BotConfigStore) -> str:
         "- Listeners can also carry `store_edits` in the JSON.\n"
         "- Listeners can also carry `mark_target_unread` in the JSON.\n"
         "- Listeners can also carry `enabled` (master switch) and `disabled_target_ids` (individually paused targets) in the JSON; both are editable in the control bot.\n"
+        "- A target in `target_chats` can carry `topic_id` (and `topic_name`) to post into one forum topic; `0` means the chat itself. One target per chat and listener.\n"
         "- `name_prefix` is off by default and can be enabled with `--name-prefix`.\n"
         "- `copy_incoming` and `copy_outgoing` both default to `true`.\n"
         "- `store_edits` defaults to `false`.\n"

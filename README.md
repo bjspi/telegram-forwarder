@@ -39,6 +39,7 @@
 ## Features
 
 - **Chat-to-chat forwarding** — copies messages (text and every media type) from source chats into any number of target chats.
+- **Forum topics as targets** — a target can be one topic of a forum supergroup (`<chat>:<topic_id>`), not just a whole chat.
 - **Works with copy-protected chats** — channels and groups with *"Restrict saving content"* enabled (typical for premium/paid channels) block normal forwarding and copying; the re-upload fallback mirrors them anyway, for every media type.
 - **Two-stage copy fallback** — tries Telegram's native `copy` first; when that is blocked, it transparently downloads and re-uploads the media as a fresh message.
 - **Edit propagation** — text and media edits are mirrored into active targets; optionally recent edit history is rendered into the message (`store_edits`), keeping the newest versions that fit Telegram's limits.
@@ -169,7 +170,11 @@ Listener and keep-alive rules live in `bot_config.json`. It is normally managed 
   "listeners": [
     {
       "source_chat_id": -1001234567890,
-      "target_chats": [{ "chat_id": -1009876543210, "chat_name": "My Archive" }],
+      "target_chats": [
+        { "chat_id": -1009876543210, "chat_name": "My Archive" },
+        // optional: post into one forum topic of a supergroup
+        { "chat_id": -1005556667778, "chat_name": "Project", "topic_id": 42, "topic_name": "Preview" }
+      ],
       "exclusions": ["*spoiler*"],   // fnmatch patterns on text/caption
       "name_prefix": false,
       "copy_incoming": true,
@@ -190,6 +195,16 @@ Listener and keep-alive rules live in `bot_config.json`. It is normally managed 
 }
 ```
 
+### Forum topics as targets
+
+A target can be a single **topic of a forum supergroup** instead of the whole group. Give the target a `topic_id` (Telegram's message-thread id) and every copy — including the re-upload fallback and edit replacements — is posted into that topic.
+
+- **Chat commands:** append the topic to the target, `/copy -1005556667778:42` or `/copy @project:42`. The topic is verified before the rule is saved. Run `/show_id` inside a topic to get its id in exactly this form.
+- **Control bot:** when the picked target is a forum, a topic picker follows (*Whole group* or one of its topics).
+- **By hand:** set `topic_id` in `bot_config.json`; a missing `topic_name` is filled in automatically.
+
+`topic_id` `0` (the default) targets the chat itself, which is the *General* topic in a forum. A listener holds **one target per chat**: naming a group that already is a target with another topic moves that target, it does not add a second one. Different listeners can of course use different topics of the same group. Mirroring the read state and `mark_target_unread` act on the group as a whole, not on the single topic.
+
 ### Headless mode (no chat commands)
 
 Maybe you don't want the bot reacting to anything typed in chats — you'd rather configure everything centrally in the JSON file. Set:
@@ -207,11 +222,12 @@ With `ENABLE_CHAT_COMMANDS=true` (the default), the bot is controlled from your 
 | Command | Effect |
 | --- | --- |
 | `/helpf` | Show the help text. |
-| `/show_id` | Show the current chat id. |
+| `/show_id` | Show the current chat id — and, inside a forum topic, the topic id. |
 | `/list_chats` | List the 20 most recent chats with type, name and id. |
 | `/config` · `/config <source>` · `/config all` | Show listener configuration. |
 | `/copy <target> [more...] [--name-prefix] [--view-once=off\|on\|only]` | Use the current chat as source and add targets. |
 | `/copy <source> <target> [more...]` | Create a rule from any chat. |
+| `/copy <target>:<topic_id>` | Any target may name a [forum topic](#forum-topics-as-targets), e.g. `-1005556667778:42`. |
 | `/stop` · `/stop <source>` · `/stop <source> <target>` | Remove listeners or single connections. |
 | `/keepalive [HH:MM:SS]` · `/keepalive pause` · `/keepalive off` | Manage the chat's daily keep-alive. |
 
@@ -245,7 +261,7 @@ Then send `/menu` to your bot. Every screen is **locked to `CONTROL_BOT_OWNER_ID
 - **📊 Status** (also directly via `/status`) — connection health (time since the last successful Telegram check) plus every listener and keep-alive with its live ▶️/⏸ state, target counts and settings — with a 🔄 Refresh button.
 - **📡 Listeners** — every source chat as a button with its ▶️/⏸ state and target count. Inside a listener:
   - **⏸ Pause / ▶️ Resume** — a master switch per listener; a paused listener keeps all its settings but forwards nothing.
-  - **🎯 Targets** — manage each target individually: pause/resume it with one tap (reversible, the reference is kept), 🗑 remove it for good (with a confirm screen), or **➕ Add target** via the recent-chats picker.
+  - **🎯 Targets** — manage each target individually: pause/resume it with one tap (reversible, the reference is kept), 🗑 remove it for good (with a confirm screen), or **➕ Add target** via the recent-chats picker (forum groups then offer a topic picker).
   - **Direction** — incoming · outgoing · both
   - **View-once media** — off · on · only
   - **Name prefix**, **Store edits**, **Mark target unread**
@@ -253,7 +269,7 @@ Then send `/menu` to your bot. Every screen is **locked to `CONTROL_BOT_OWNER_ID
   - **🗑 Delete listener** — remove the whole rule, behind a confirm screen
 - **⏰ Keep-alives** — per row: toggle with one tap, **🕒 change the time**, or **🗑 delete** (with confirm). **➕ Add keep-alive** builds a new one.
 
-**Creating rules from the menu:** *Add listener*, *Add target* and *Add keep-alive* walk you through a short flow. For each chat you either **pick from your 20 most recently active chats** (the userbot fetches them live — no need to remember ids) or **type a chat id / @username**, which is verified by resolving it before anything is saved. Keep-alive times are entered as `HH:MM:SS` and validated. **Destructive actions always show a confirm screen first** — and wherever pausing would do, the confirm text says so. Message pools and exclusions are still configured with the userbot's commands or by editing `bot_config.json`.
+**Creating rules from the menu:** *Add listener*, *Add target* and *Add keep-alive* walk you through a short flow. For each chat you either **pick from your 20 most recently active chats** (the userbot fetches them live — no need to remember ids) or **type a chat id / @username**, which is verified by resolving it before anything is saved. If a target is a forum supergroup you then choose **the whole group or one of its topics** (a typed target may also name the topic directly as `<chat>:<topic_id>`). Keep-alive times are entered as `HH:MM:SS` and validated. **Destructive actions always show a confirm screen first** — and wherever pausing would do, the confirm text says so. Message pools and exclusions are still configured with the userbot's commands or by editing `bot_config.json`.
 
 The control bot also registers its own command menu (`/menu`, `/status`, `/start`) via the Bot API, so the commands show up in Telegram's UI.
 
